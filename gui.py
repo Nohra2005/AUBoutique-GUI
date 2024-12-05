@@ -2,9 +2,10 @@ from PyQt5.QtWidgets import (
     QApplication, QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem, QTextEdit 
 )
-from PyQt5.QtCore import Qt, QPropertyAnimation, QRect
-from PyQt5.QtGui import QIcon, QFont
+from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint
+from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPainterPath, QPolygon
 import sqlite3
+import math
 
 
 class ProductWidget(QFrame):
@@ -29,7 +30,7 @@ class ProductWidget(QFrame):
                 border: 1px solid #ccc;
                 border-radius: 10px;
                 background-color: #f9f9f9;
-                padding: 10px;
+                padding: 15px;
             }
             QLabel {
                 font-size: 14px;
@@ -56,38 +57,62 @@ class ProductWidget(QFrame):
         # Left: Product details
         details_layout = QVBoxLayout()
 
-        # Create labels
-        name_label = QLabel(f"Name: {self.name}")
-        description_label = QLabel(f"Description: {self.description}")
-        self.price_label = QLabel(f"Price: {self.currency_symbol}{self.price:.2f}")
-        owner_label = QLabel(f"Owner: {self.owner}")
-        rating_label = QLabel(f"Rating: {self.rating:.1f} ★")
-        quantity_label = QLabel(f"Quantity: {self.quantity}")
+        # Name and description
+        name_label = QLabel(self.name)
+        name_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        description_label = QLabel(self.description)
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("font-size: 14px; color: #555;")
 
-        # Add labels to the details layout
+        # Average rating and rate button
+        rating_layout = QHBoxLayout()
+        rating_layout.setSpacing(5)  # Reduced spacing to bring the Rate button closer to the stars
+        rating_layout.setAlignment(Qt.AlignLeft)
+
+        average_rating_label = QLabel("Average Rating:")  # Added label for average rating
+        average_rating_label.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
+
+        self.rating_widget = RatingWidget(self.rating)
+        rate_button = QPushButton("Rate")
+        rate_button.setFixedSize(80, 30)
+        rate_button.clicked.connect(self.rate_product)
+
+        rating_layout.addWidget(average_rating_label)
+        rating_layout.addWidget(self.rating_widget)
+        rating_layout.addWidget(rate_button)
+
+        # Add labels and rate button to the details layout
         details_layout.addWidget(name_label)
         details_layout.addWidget(description_label)
-        details_layout.addWidget(self.price_label)
-        details_layout.addWidget(owner_label)
-        details_layout.addWidget(rating_label)
-        details_layout.addWidget(quantity_label)
+        details_layout.addLayout(rating_layout)
 
         layout.addLayout(details_layout)
 
-        # Right: Buy and Rate buttons
+        # Right: Owner, price, and add to cart button
         buttons_layout = QVBoxLayout()
+        buttons_layout.setAlignment(Qt.AlignTop)
 
-        buy_button = QPushButton("Buy")
-        buy_button.setFixedSize(100, 30)
-        buy_button.clicked.connect(self.buy_product)
-        buttons_layout.addWidget(buy_button)
+        # Owner label
+        owner_label = QLabel(f"Owner: {self.owner}")
+        owner_label.setStyleSheet("font-size: 14px; color: #777;")
 
-        rate_button = QPushButton("Rate")
-        rate_button.setFixedSize(100, 30)
-        rate_button.clicked.connect(self.rate_product)
-        buttons_layout.addWidget(rate_button)
+        # Price label
+        self.price_label = QLabel(f"Price: {self.currency_symbol}{self.price:.2f}")
+        self.price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+
+        # Add to Cart button
+        add_to_cart_button = QPushButton("Add to Cart")
+        add_to_cart_button.setFixedSize(100, 40)
+        add_to_cart_button.clicked.connect(self.buy_product)
+
+        # Add widgets to the buttons layout
+        buttons_layout.addWidget(owner_label)
+        buttons_layout.addWidget(self.price_label)
+        buttons_layout.addStretch()  # Add some space between price and button
+        buttons_layout.addWidget(add_to_cart_button)
 
         layout.addLayout(buttons_layout)
+
         self.setLayout(layout)
 
     def update_price(self, exchange_rate, symbol):
@@ -138,9 +163,88 @@ class ProductWidget(QFrame):
             self.update_rating_display()
 
     def update_rating_display(self):
-        details_layout = self.layout().itemAt(0).layout()
-        rating_label = details_layout.itemAt(details_layout.count() - 2).widget()
-        rating_label.setText(f"Rating: {self.rating:.1f} ★")
+        self.rating_widget.update_rating(self.rating)
+
+
+class RatingWidget(QWidget):
+    """Widget to display rating as stars."""
+    def __init__(self, rating, parent=None):
+        super().__init__(parent)
+        self.rating = rating
+        self.setFixedSize(260, 40)  # Increased widget size to provide more room for stars and rating text
+
+    def update_rating(self, rating):
+        """Update the rating displayed by the widget."""
+        self.rating = rating
+        self.update()
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+
+        star_size = 12  # Size of each star
+        spacing = 8     # Reduced space between stars to bring them closer
+        total_stars = 5
+
+        filled_color = QColor("#FFD700")  # Gold color for filled star
+        empty_color = QColor("#ccc")      # Gray color for empty star
+
+        def draw_star(x, y, size, fill_ratio=1.0):
+            """Helper function to draw a star with a given fill ratio."""
+            # Define the star points
+            star_points = []
+            for i in range(10):
+                angle = math.pi / 5 * i
+                radius = size if i % 2 == 0 else size / 2.5
+                px = int(x + math.cos(angle) * radius)
+                py = int(y - math.sin(angle) * radius)
+                star_points.append(QPoint(px, py))
+
+            star_polygon = QPolygon(star_points)
+
+            if fill_ratio == 1:
+                # Full star
+                painter.setBrush(QBrush(filled_color))
+                painter.drawPolygon(star_polygon)
+            elif fill_ratio > 0:
+                # Partial star - draw filled part
+                painter.setBrush(QBrush(filled_color))
+                painter.setClipRect(x - size, y - size, int(size * 2 * fill_ratio), int(size * 2), Qt.ReplaceClip)
+                painter.drawPolygon(star_polygon)
+                painter.setClipping(False)
+
+                # Draw empty part
+                painter.setBrush(QBrush(empty_color))
+                painter.setClipRect(x - size + int(size * 2 * fill_ratio), y - size, int(size * 2 * (1 - fill_ratio)), int(size * 2), Qt.ReplaceClip)
+                painter.drawPolygon(star_polygon)
+                painter.setClipping(False)
+            else:
+                # Empty star
+                painter.setBrush(QBrush(empty_color))
+                painter.drawPolygon(star_polygon)
+
+        # Determine how many stars are completely filled and if there is a partially filled star
+        full_stars = int(self.rating)
+        partial_star_ratio = self.rating - full_stars
+
+        # Draw the stars based on the rating
+        for i in range(total_stars):
+            x = 10 + i * (star_size + spacing) + (star_size // 2)  # Added 10 to x to move all stars to the right
+            y = star_size + 8  # Lowered stars by adjusting y value
+
+            if i < full_stars:
+                draw_star(x, y, star_size, 1)  # Draw full star
+            elif i == full_stars and partial_star_ratio > 0:
+                draw_star(x, y, star_size, partial_star_ratio)  # Draw partially filled star
+            else:
+                draw_star(x, y, star_size, 0)  # Draw empty star
+
+        # Draw numeric rating value to the right of stars
+        painter.setPen(QColor("#333"))
+        text_x = total_stars * (star_size + spacing) + 20  # Adjusted to add more space between stars and text
+        text_y = y + 3  # Lowered the text to align better with the stars
+        painter.drawText(text_x, text_y, f"{self.rating:.1f}")
+
 
 
 class ProductListPage(QWidget):
