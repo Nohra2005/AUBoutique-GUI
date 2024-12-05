@@ -230,15 +230,31 @@ class ProductListPage(QWidget):
 
         self.setLayout(main_layout)
 
+    def resizeEvent(self, event):
+        """Ensure the chat button and chat panel resize properly with the window."""
+        super().resizeEvent(event)
+        chat_width = self.width() // 3
+
+        # Adjust the chat panel's position and size based on its current state
+        if self.chat_panel.width() > 0:  # If the chat panel is open
+            self.chat_panel.setGeometry(self.width() - chat_width, 0, chat_width, self.height())
+        else:  # If the chat panel is closed
+            self.chat_panel.setGeometry(self.width(), 0, 0, self.height())
+
+        # Update the button position
+        self.update_chat_button_position()
+
 
     def toggle_chat_panel(self):
-        """Slide the chat panel in and out."""
+        """Slide the chat panel in and out, keeping it proportional."""
+        chat_width = self.width() // 3  
+
         if self.chat_panel.width() == 0:  # Slide in
             self.chat_animation.setStartValue(QRect(self.width(), 0, 0, self.height()))
-            self.chat_animation.setEndValue(QRect(self.width() - 270, 0, 270, self.height()))
+            self.chat_animation.setEndValue(QRect(self.width() - chat_width, 0, chat_width, self.height()))
             self.chat_button.setText("▶")
         else:  # Slide out
-            self.chat_animation.setStartValue(QRect(self.width() - 270, 0, 270, self.height()))
+            self.chat_animation.setStartValue(QRect(self.width() - chat_width, 0, chat_width, self.height()))
             self.chat_animation.setEndValue(QRect(self.width(), 0, 0, self.height()))
             self.chat_button.setText("◀")
 
