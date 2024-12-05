@@ -24,6 +24,3 @@ def validate_user(username, password):
         return True
     else:
         return False
-
-
-

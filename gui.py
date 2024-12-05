@@ -1,18 +1,61 @@
 import sys
 import sqlite3
-from functions import*
-from styleSheet import style
+from functions import *
+from main_page import *
+
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget, QLineEdit, QMessageBox
 )
+
+from PyQt5.QtCore import Qt
+
+style = """
+    QWidget {
+        background-color: #f0f0f0;
+        font-family: Arial, sans-serif;
+        font-size: 14px;
+    }
+    
+    QPushButton {
+        background-color: #4CAF50;
+        color: white;
+        border-radius: 5px;
+        padding: 10px;
+        font-size: 16px;
+    }
+
+    QPushButton:hover {
+        background-color: #45a049;
+    }
+    
+    QLineEdit {
+        background-color: white;
+        border: 1px solid #ccc;
+        padding: 10px;
+        font-size: 14px;
+    }
+
+    QLabel {
+        color: #333;
+        font-weight: bold;
+        text-align: center;
+    }
+
+    QVBoxLayout, QHBoxLayout {
+        margin: 10px;
+        padding: 10px;
+    }
+"""
 
 class EntryPage(QWidget):
     def __init__(self, main_window):
         super().__init__()
         self.main_window = main_window  # Store reference to MainWindow
         layout = QVBoxLayout()
+
         header = QLabel("AUBoutique")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 20px;")
+        header.setStyleSheet("font-size: 24px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)  # Center the label text
         layout.addWidget(header)
 
         login_button = QPushButton("Login")
@@ -35,8 +78,10 @@ class RegistrationPage(QWidget):
         super().__init__(parent)
         self.main_window = main_window  # Store reference to MainWindow
         layout = QVBoxLayout()
+
         header = QLabel("Register")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 20px;")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)
         layout.addWidget(header)
         
         # Registration input fields
@@ -58,6 +103,10 @@ class RegistrationPage(QWidget):
         submit_button = QPushButton("Submit")
         submit_button.clicked.connect(self.register)
         layout.addWidget(submit_button)
+
+        back_button = QPushButton("Go Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
         
         self.setLayout(layout)
 
@@ -77,28 +126,37 @@ class RegistrationPage(QWidget):
         else:
             QMessageBox.warning(self, "Error", "Please fill in all fields.")
 
+    def go_back(self):
+        self.main_window.set_page(EntryPage(self.main_window))
+
 class LoginPage(QWidget):
     def __init__(self, main_window, parent=None):
         super().__init__(parent)
         self.main_window = main_window
         layout = QVBoxLayout()
+
         header = QLabel("Login")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 20px;")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)
         layout.addWidget(header)
         
-        # Ensure that self.password_input is correctly initialized
         self.username_input = QLineEdit(self)
         self.username_input.setPlaceholderText("Username")
-        self.password_input = QLineEdit(self)  # Initialize password input
+        self.password_input = QLineEdit(self)
         self.password_input.setPlaceholderText("Password")
-        self.password_input.setEchoMode(QLineEdit.Password)  # Hide password characters
-        
+        self.password_input.setEchoMode(QLineEdit.Password)
+
         layout.addWidget(self.username_input)
         layout.addWidget(self.password_input)
         
         submit_button = QPushButton("Submit")
         submit_button.clicked.connect(self.login)
         layout.addWidget(submit_button)
+
+        back_button = QPushButton("Go Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
+
         self.setLayout(layout)
 
     def login(self):
@@ -106,118 +164,16 @@ class LoginPage(QWidget):
         password = self.password_input.text()
         if username and password:
             if validate_user(username, password):
-                self.main_window.set_page(MainPage(self.main_window))
+                self.main_window.set_page(ProductListPage(self.main_window))
             else:
                 QMessageBox.warning(self, "Error", "Invalid credentials")
         else:
             QMessageBox.warning(self, "Error", "Please fill in all fields.")
 
-class MainPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        layout = QVBoxLayout()
-        header = QLabel("Welcome to AUBoutique!")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 20px;")
-        layout.addWidget(header)
-        layout.addWidget(QLabel("Home page"))
-        
-        my_items_button = QPushButton("View my items")
-        my_items_button.clicked.connect(self.view_my_items)
-        layout.addWidget(my_items_button)
-        browse_button = QPushButton("Browse items")
-        browse_button.clicked.connect(self.go_to_shop)
-        layout.addWidget(browse_button)
-        logout_button = QPushButton("Logout")
-        logout_button.clicked.connect(self.go_to_entry)
-        layout.addWidget(logout_button)
-        self.setLayout(layout)
-        
-    def view_my_items(self):
-        self.main_window.set_page(MyItemsPage(self.main_window))
-    def go_to_shop(self):
-        self.main_window.set_page(ShopPage(self.main_window))
-    def go_to_entry(self):
+    def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
 
-class MyItemsPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        layout = QVBoxLayout()
-        header = QLabel("My Products")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 20px;")
-        layout.addWidget(header)
 
-        self.product_list = QLabel("Your products will be displayed here.")  #todo
-        layout.addWidget(self.product_list)
-
-        add_product_button = QPushButton("Add Product")
-        add_product_button.clicked.connect(self.add_product)
-        layout.addWidget(add_product_button)
-
-        back_button = QPushButton("Back")
-        back_button.clicked.connect(self.go_back)
-        layout.addWidget(back_button)
-
-        self.setLayout(layout)
-
-class AddProductPage(QWidget):
-    def __init__(self, main_window):
-        super().__init__()
-        self.main_window = main_window
-        layout = QVBoxLayout()
-        header = QLabel("Add Product")
-        header.setStyleSheet("font-size: 20px; font-weight: bold; margin-bottom: 20px;")
-        layout.addWidget(header)
-
-        self.name_input = QLineEdit(self)
-        self.name_input.setPlaceholderText("Product Name")
-        self.description_input = QLineEdit(self)
-        self.description_input.setPlaceholderText("Description")
-        self.price_input = QLineEdit(self)
-        self.price_input.setPlaceholderText("Price")
-        layout.addWidget(self.name_input)
-        layout.addWidget(self.description_input)
-        layout.addWidget(self.price_input)
-
-        submit_button = QPushButton("Submit")
-        submit_button.clicked.connect(self.submit_product)
-        layout.addWidget(submit_button)
-
-        back_button = QPushButton("Back")
-        back_button.clicked.connect(self.go_back)
-        layout.addWidget(back_button)
-
-        self.setLayout(layout)
-
-    def add_product(name, description, price, owner_username):
-        conn = sqlite3.connect('auboutique.db')
-        cursor = conn.cursor()
-        cursor.execute("""
-            INSERT INTO Products (name, description, price, owner_username)
-            VALUES (?, ?, ?, ?)
-        """, (name, description, price, owner_username))
-        conn.commit()
-        conn.close()
-
-def get_products_by_owner(owner_username):
-    conn = sqlite3.connect('auboutique')
-    cursor = conn.cursor()
-    cursor.execute("""
-        SELECT product_id, name, description, price, buyer_username
-        FROM Products
-        WHERE owner_username = ?
-    """, (owner_username,))
-    products = cursor.fetchall()
-    conn.close()
-    return products
-    def go_back(self):
-        self.main_window.set_page(MyItemsPage(self.main_window))
-        
-class ShopPage():
-    print("todo")
-    
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -231,17 +187,16 @@ class MainWindow(QMainWindow):
         self.set_page(EntryPage(self))  
 
     def set_page(self, page):
-        # Remove the previous widget from layout
         if self.container_layout.count() > 0:
             widget = self.container_layout.itemAt(0).widget()
             if widget:
-                widget.setParent(None)  # Remove the widget from the layout
-        self.container_layout.addWidget(page) # Add the new widget (page) to the layout
-        page.show()  # Ensure the new page is shown
-
+                widget.setParent(None)
+        self.container_layout.addWidget(page)
+        page.show()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
     sys.exit(app.exec_())
+
