@@ -165,6 +165,7 @@ class LoginPage(QWidget):
         if username and password:
             if validate_user(username, password):
                 self.main_window.set_page(ProductListPage(self.main_window))
+                self.main_window.resize_window(1000, 800)
             else:
                 QMessageBox.warning(self, "Error", "Invalid credentials")
         else:
@@ -193,6 +194,10 @@ class MainWindow(QMainWindow):
                 widget.setParent(None)
         self.container_layout.addWidget(page)
         page.show()
+
+    def resize_window(self, width, height):
+        """Resize the window dynamically."""
+        self.setGeometry(self.x(), self.y(), width, height)
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)
