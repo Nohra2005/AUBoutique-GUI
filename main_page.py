@@ -1,13 +1,26 @@
 import sys
 import sqlite3
 from functions import *
-from main_page import *
+from socket import *
+import json
+import threading
+import time
+from gui import *
+
 
 from PyQt5.QtWidgets import (
     QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout, QWidget, QLineEdit, QMessageBox
 )
 
 from PyQt5.QtCore import Qt
+
+
+client = socket(AF_INET, SOCK_STREAM)
+client.connect(('localhost', 8888))
+
+responses=[]
+listener_thread = threading.Thread(target=listen_for_responses, daemon=True)
+listener_thread.start()
 
 style = """
     QWidget {
@@ -115,16 +128,24 @@ class RegistrationPage(QWidget):
         email = self.email_input.text()
         username = self.username_input.text()
         password = self.password_input.text()
+        
+        registration_data = {
+            "name": name,
+            "email": email,
+            "username": username,
+            "password": password
+        }
 
         if name and email and username and password:
-            try:
-                register_user(name, email, username, password)
-                QMessageBox.information(self, "Success", "Registration successful! Please log in.")
+            response =send_command("register", registration_data)
+            if response.get("status") == "success":
+                QMessageBox.information(self, "Success", "Registration successful! Please login.")
                 self.main_window.set_page(EntryPage(self.main_window))
-            except sqlite3.IntegrityError:
-                QMessageBox.warning(self, "Error", "Username already exists.")
         else:
-            QMessageBox.warning(self, "Error", "Please fill in all fields.")
+            QMessageBox.critical(self, "Error", response.get("message", "Registration failed"))
+        
+    def go_back(self):
+        self.main_window.set_page(EntryPage(self.main_window))
 
     def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
@@ -162,50 +183,24 @@ class LoginPage(QWidget):
     def login(self):
         username = self.username_input.text()
         password = self.password_input.text()
+        
+        login_data = {
+            "username": username,
+            "password": password
+        }
+        
         if username and password:
-            if validate_user(username, password):
+            response = send_command("login", login_data)
+            if response.get("status") == "success":
+                QMessageBox.information(self, "Success", "Login successful!")
+                self.parent().username = username  # Store logged-in username
                 self.main_window.set_page(ProductListPage(self.main_window))
-
-                screen = QApplication.desktop().screenGeometry()
-                self.main_window.resize(screen.width(), screen.height() - 70)
-                self.main_window.move(0, 0)
-
             else:
-                QMessageBox.warning(self, "Error", "Invalid credentials")
+                QMessageBox.critical(self, "Error", response.get("message", "Invalid credentials."))
         else:
             QMessageBox.warning(self, "Error", "Please fill in all fields.")
 
+
     def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
-
-
-class MainWindow(QMainWindow):
-    def __init__(self):
-        super().__init__()
-        self.setWindowTitle("AUBoutique")
-        self.setGeometry(300, 100, 400, 300)
-        self.setStyleSheet(style)
-        self.container = QWidget()
-        self.setCentralWidget(self.container)
-        self.container_layout = QVBoxLayout() 
-        self.container.setLayout(self.container_layout)
-        self.set_page(EntryPage(self))  
-
-    def set_page(self, page):
-        if self.container_layout.count() > 0:
-            widget = self.container_layout.itemAt(0).widget()
-            if widget:
-                widget.setParent(None)
-        self.container_layout.addWidget(page)
-        page.show()
-
-    def resize_window(self, width, height):
-        """Resize the window dynamically."""
-        self.setGeometry(self.x(), self.y(), width, height)
-
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    window = MainWindow()
-    window.show()
-    sys.exit(app.exec_())
 
