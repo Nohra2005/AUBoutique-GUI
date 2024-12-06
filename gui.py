@@ -1,11 +1,12 @@
-from PyQt5.QtWidgets import (
-    QApplication, QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem, QTextEdit 
+from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
+    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget 
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint
-from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPainterPath, QPolygon
+from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon
 import sqlite3
 import math
+import sys
+from main_page import style, send_command, EntryPage    
 
 
 class ProductWidget(QFrame):
@@ -75,7 +76,7 @@ class ProductWidget(QFrame):
         self.rating_widget = RatingWidget(self.rating)
         rate_button = QPushButton("Rate")
         rate_button.setFixedSize(80, 30)
-        rate_button.clicked.connect(self.rate_product)
+        rate_button.clicked.connect(self.rate)
 
         rating_layout.addWidget(average_rating_label)
         rating_layout.addWidget(self.rating_widget)
@@ -143,27 +144,19 @@ class ProductWidget(QFrame):
         details_layout = self.layout().itemAt(0).layout()
         quantity_label = details_layout.itemAt(details_layout.count() - 1).widget()
         quantity_label.setText(f"Quantity: {self.quantity}")
-
-    def rate_product(self):
+    
+    def rate(self):
+        # Ask the user for a rating (1-5)
         rating, ok = QInputDialog.getInt(self, "Rate Product", "Enter your rating (1-5):", min=1, max=5)
         if ok:
-            conn = sqlite3.connect("auboutique.db")
-            cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE products
-                SET average_rating = (average_rating * review_count + ?) / (review_count + 1),
-                    review_count = review_count + 1
-                WHERE product_id = ?
-            """, (rating, self.product_id))
-            conn.commit()
-
-            cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (self.product_id,))
-            self.rating = cursor.fetchone()[0]
-            conn.close()
-            self.update_rating_display()
-
-    def update_rating_display(self):
-        self.rating_widget.update_rating(self.rating)
+            # Prepare the data to be sent to the server
+            rating_data = {
+                "rating": rating,  # Correct dictionary syntax
+                "product_id": self.product_id  # Use the provided product ID
+            }
+            # Send the command to the server
+            response = send_command("rate", rating_data)
+            self.rating_widget.update_rating(self, response)
 
 
 class RatingWidget(QWidget):
@@ -246,7 +239,6 @@ class RatingWidget(QWidget):
         painter.drawText(text_x, text_y, f"{self.rating:.1f}")
 
 
-
 class ProductListPage(QWidget):
     """Page to display a scrollable list of product boxes with additional features."""
     def __init__(self, username):
@@ -268,6 +260,7 @@ class ProductListPage(QWidget):
         menu = QMenu()
         menu.addAction("My Products")
         menu.addAction("Add Product")
+        menu.addAction("Log out")
         self.username_button.setMenu(menu)
         header_layout.addWidget(self.username_button)
 
@@ -298,7 +291,7 @@ class ProductListPage(QWidget):
         self.content_layout = QVBoxLayout(content_widget)
 
         # Fetch products from the database and add to the content layout
-        products = self.fetch_products()
+        products = send_command("view_products")
         for product in products:
             product_id, name, description, price, owner, rating, quantity = product
             product_widget = ProductWidget(product_id, name, description, price, owner, rating, quantity)
@@ -376,7 +369,6 @@ class ProductListPage(QWidget):
         self.chat_animation.start()
         self.chat_button.update()  # Force repaint
 
-
     def update_chat_button_position(self):
         """Update the chat button position to align with the chat panel."""
         button_y = self.height() // 2 - self.chat_button.height() // 2
@@ -393,19 +385,6 @@ class ProductListPage(QWidget):
         except Exception as e:
             print(f"Error fetching exchange rates: {e}")
             return {"USD": 1}
-
-    def fetch_products(self):
-        """Fetch products from the SQLite database."""
-        conn = sqlite3.connect("auboutique.db")
-        cursor = conn.cursor()
-        cursor.execute("""
-            SELECT product_id, name, description, price, owner_username, average_rating, quantity
-            FROM products
-            WHERE buyer_username IS NULL
-        """)
-        products = cursor.fetchall()
-        conn.close()
-        return products
 
     def update_currency(self, currency):
         """Update displayed prices when the currency changes."""
@@ -602,7 +581,6 @@ class ChatPanel(QWidget):
         self.chat_area_widget.setVisible(True)
         self.parent().update_chat_button_position()  
 
-
     def send_message(self):
         """Send a new message."""
         message = self.message_input.text()
@@ -627,13 +605,32 @@ class AUBoutiqueApp(QMainWindow):
         self.setCentralWidget(self.product_list_page)
 
 
+class MainWindow(QMainWindow):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("AUBoutique")
+        self.setGeometry(300, 100, 400, 300)
+        self.setStyleSheet(style)
+        self.container = QWidget()
+        self.setCentralWidget(self.container)
+        self.container_layout = QVBoxLayout() 
+        self.container.setLayout(self.container_layout)
+        self.set_page(EntryPage(self))  
+
+    def set_page(self, page):
+        if self.container_layout.count() > 0:
+            widget = self.container_layout.itemAt(0).widget()
+            if widget:
+                widget.setParent(None)
+        self.container_layout.addWidget(page)
+        page.show()
+
+    def resize_window(self, width, height):
+        """Resize the window dynamically."""
+        self.setGeometry(self.x(), self.y(), width, height)
 
 if __name__ == "__main__":
-    import sys
     app = QApplication(sys.argv)
-
-    username = "JohnDoe"  # Replace with the actual logged-in username
-    main_window = AUBoutiqueApp(username)
-    main_window.show()
-
+    window = MainWindow()
+    window.show()
     sys.exit(app.exec_())
