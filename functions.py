@@ -1,36 +1,10 @@
 import sqlite3
 from socket import *
 import json
-import threading
-import time
-from gui import client, responses
 
-# Function to send a command to the server
-def send_command(command, data=None):
-    message = {"command": command}
-    if data:
-        message.update(data)
-    client.send(json.dumps(message).encode('utf-8'))
-    while len(responses)==0:
-        time.sleep(0.1)
-    return responses.pop()
-
-# Function to listen for incoming messages
-def listen_for_responses():
-    while True:
-        try:
-            message = client.recv(1024).decode('utf-8')
-            if message.startswith("\nNew message from"):
-                print(message) 
-            else:
-                responses.append(message)
-        except BlockingIOError:
-            time.sleep(0.1)  
-        except:
-            print("Connection to the server was lost.")
-            break
 
 online_users = {}
+
 def client_handler(client_socket):
     username = None
     while True:
@@ -54,25 +28,25 @@ def client_handler(client_socket):
                 if response == "Login successful":
                     username = data["username"]
                     online_users[username] = client_socket 
-                    pending_msgs = get_pending_messages(username)
-                    if len(pending_msgs)!=0:
-                        response += "\n\nYou have pending messages:\n" + "\n".join(pending_msgs)
+                    #pending_msgs = get_pending_messages(username)
+                    #if len(pending_msgs)!=0:
+                        #response += "\n\nYou have pending messages:\n" + "\n".join(pending_msgs)
             elif data["command"] == "rate":
                 reponse = rate_product(data)
-            elif data["command"] == "add_product":
-                response = add_product(data)
-            elif data["command"] == "view_buyers":
-                response = view_buyers(username)
+            #elif data["command"] == "add_product":
+                #response = add_product(data)
+            #elif data["command"] == "view_buyers":
+                #response = view_buyers(username)
             elif data["command"] == "view_products":
                 response = fetch_products()
-            elif data["command"] == "view_products_by_owner":
-                response = view_products_by_owner(data)
-            elif data["command"] == "add_to_cart":
-                response = buy_product(username,data)
-            elif data["command"] == "check_online_status":
-                response = check_online_status(data)
-            elif data["command"] == "send_message":
-                response = send_message(username, data["owner"], data["message"])
+            #elif data["command"] == "view_products_by_owner":
+                #response = view_products_by_owner(data)
+            #elif data["command"] == "add_to_cart":
+                #response = buy_product(username,data)
+            #elif data["command"] == "check_online_status":
+                #response = check_online_status(data)
+            #elif data["command"] == "send_message":
+                #response = send_message(username, data["owner"], data["message"])
             elif data["command"] == "quit":
                 online_users[username]=None
                 break
@@ -88,6 +62,7 @@ def client_handler(client_socket):
             break
 
     client_socket.close()
+
 
 # Server functionalities
 def register_user(data):
