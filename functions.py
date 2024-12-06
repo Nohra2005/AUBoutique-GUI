@@ -1,26 +1,147 @@
 import sqlite3
+from socket import *
+import json
+import threading
+import time
+from gui import client, responses
 
-def register_user(name, email, username, password):
-    conn = sqlite3.connect('auboutique.db')
+# Function to send a command to the server
+def send_command(command, data=None):
+    message = {"command": command}
+    if data:
+        message.update(data)
+    client.send(json.dumps(message).encode('utf-8'))
+    while len(responses)==0:
+        time.sleep(0.1)
+    return responses.pop()
+
+# Function to listen for incoming messages
+def listen_for_responses():
+    while True:
+        try:
+            message = client.recv(1024).decode('utf-8')
+            if message.startswith("\nNew message from"):
+                print(message) 
+            else:
+                responses.append(message)
+        except BlockingIOError:
+            time.sleep(0.1)  
+        except:
+            print("Connection to the server was lost.")
+            break
+
+online_users = {}
+def client_handler(client_socket):
+    username = None
+    while True:
+        try:
+            # Receive and decode the client's message
+            message = client_socket.recv(1024).decode('utf-8')
+            if not message:
+                break
+
+            # Parse the message (JSON formatted)
+            data = json.loads(message)
+
+            # Dispatch the correct action based on the command
+            if data["command"] == "register":
+                response = register_user(data)
+                if response=="Registration successful":
+                    username = data["username"]
+                    online_users[username] = None
+            elif data["command"] == "login":
+                response = login_user(data)
+                if response == "Login successful":
+                    username = data["username"]
+                    online_users[username] = client_socket 
+                    pending_msgs = get_pending_messages(username)
+                    if len(pending_msgs)!=0:
+                        response += "\n\nYou have pending messages:\n" + "\n".join(pending_msgs)
+            elif data["command"] == "rate":
+                reponse = rate_product(data)
+            elif data["command"] == "add_product":
+                response = add_product(data)
+            elif data["command"] == "view_buyers":
+                response = view_buyers(username)
+            elif data["command"] == "view_products":
+                response = fetch_products()
+            elif data["command"] == "view_products_by_owner":
+                response = view_products_by_owner(data)
+            elif data["command"] == "add_to_cart":
+                response = buy_product(username,data)
+            elif data["command"] == "check_online_status":
+                response = check_online_status(data)
+            elif data["command"] == "send_message":
+                response = send_message(username, data["owner"], data["message"])
+            elif data["command"] == "quit":
+                online_users[username]=None
+                break
+            else:
+                response = "Invalid command"
+
+            # Send the response back to the client
+            client_socket.send(response.encode('utf-8'))
+
+        except ConnectionResetError:
+            print("Client disconnected")
+            online_users[username]=None
+            break
+
+    client_socket.close()
+
+# Server functionalities
+def register_user(data):
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO users (username, password, email, name)
+            VALUES (?, ?, ?, ?)
+        """, (data["username"], data["password"], data["email"], data["name"]))
+        conn.commit()
+        conn.close()
+        return {"status": "success", "message": "User registered successfully"}
+    except sqlite3.IntegrityError:
+        return {"status": "error", "message": "Username already exists"}
+
+def login_user(data):
+    conn = sqlite3.connect("auboutique.db")
     cursor = conn.cursor()
-    # Insert the new user into the database
-    cursor.execute('''INSERT INTO users (name, email, username, password) 
-                      VALUES (?, ?, ?, ?)''', (name, email, username, password))
-    
-    conn.commit()
-    conn.close()
-
-def validate_user(username, password):
-    conn = sqlite3.connect('auboutique.db')
-    cursor = conn.cursor()
-
-    # Check if the username exists in the database and if the password matches
-    cursor.execute('''SELECT * FROM users WHERE username = ? AND password = ?''', (username, password))
+    cursor.execute("""
+        SELECT * FROM users WHERE username = ? AND password = ?
+    """, (data["username"], data["password"]))
     user = cursor.fetchone()
-
     conn.close()
-
     if user:
-        return True
+        return {"status": "success", "message": "Login successful"}
     else:
-        return False
+        return {"status": "error", "message": "Invalid username or password"}
+    
+def fetch_products():
+    """Fetch products from the SQLite database."""
+    conn = sqlite3.connect("auboutique.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT product_id, name, description, price, owner_username, average_rating, quantity
+        FROM products
+        WHERE buyer_username IS NULL
+    """)
+    products = cursor.fetchall()
+    conn.close()
+    return products
+
+def rate_product(data):
+    conn = sqlite3.connect("auboutique.db")
+    cursor = conn.cursor()
+    cursor.execute("""
+        UPDATE products
+        SET average_rating = (average_rating * review_count + ?) / (review_count + 1),
+            review_count = review_count + 1
+        WHERE product_id = ?
+    """, (data["rating"], data["product_id"]))
+    conn.commit()
+
+    cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (data["product_id"]))
+    rating = cursor.fetchone()[0]
+    conn.close()
+    return rating
