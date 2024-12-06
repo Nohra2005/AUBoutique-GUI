@@ -1,5 +1,6 @@
 from socket import *
 import threading
+from functions import client_handler
 #from protocol import client_handler
 
 # Server setup
@@ -9,10 +10,12 @@ server.listen(5)
 
 print("Server listening on port 8888...")
 
+online_users = {}
+
 while True:
     client_socket, addr = server.accept()
     print(f"Connection from {addr}")
 
-    # Start a new thread for the client
-    #client_thread = threading.Thread(target=client_handler, args=(client_socket,))
-    #client_thread.start()
+    #Start a new thread for the client
+    client_thread = threading.Thread(target=client_handler, args=(client_socket,))
+    client_thread.start()
