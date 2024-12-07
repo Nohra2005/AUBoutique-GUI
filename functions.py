@@ -101,7 +101,7 @@ def fetch_products():
     """)
     products = cursor.fetchall()
     conn.close()
-    return {"type":0, "error":False, "constent":products}
+    return {"type":0, "error":False, "content":products}
 
 def rate_product(data):
     conn = sqlite3.connect("auboutique.db")
@@ -114,7 +114,7 @@ def rate_product(data):
     """, (data["rating"], data["product_id"]))
     conn.commit()
 
-    cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (data["product_id"]))
+    cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (data["product_id"],))
     rating = cursor.fetchone()[0]
     conn.close()
-    return rating
+    return {"type":0,"error":False,"content":float(rating)}
