@@ -224,6 +224,9 @@ class LoginPage(QWidget):
                 QMessageBox.information(self, "Success", response["content"])
                 self.parent().username = username  # Store logged-in username
                 self.main_window.set_page(ProductListPage(self.main_window,username))
+                screen = QApplication.desktop().screenGeometry()
+                self.main_window.resize(screen.width(), screen.height() - 40)
+                self.main_window.move(0, 0)  # Move closer to the top
             else:
                 QMessageBox.warning(self, "Error", response["content"])
         else:
@@ -246,7 +249,7 @@ class ProductWidget(QFrame):
         self.rating = rating
         self.quantity = quantity
         self.currency_symbol = "$"
-
+        
         # Set QFrame styling to look like a box
         self.setFrameShape(QFrame.StyledPanel)
         self.setFrameShadow(QFrame.Raised)
@@ -380,15 +383,15 @@ class ProductWidget(QFrame):
             }
             # Send the command to the server
             response = send_command("rate", rating_data)
-            self.rating_widget.update_rating(self, response)
+            self.rating_widget.update_rating(response["content"])
 
 class RatingWidget(QWidget):
     """Widget to display rating as stars."""
     def __init__(self, rating, parent=None):
         super().__init__(parent)
         self.rating = rating
-        self.setFixedSize(260, 40)  # Increased widget size to provide more room for stars and rating text
-
+        self.setFixedSize(260, 40)  
+        
     def update_rating(self, rating):
         """Update the rating displayed by the widget."""
         self.rating = rating
@@ -439,7 +442,9 @@ class RatingWidget(QWidget):
                 painter.setBrush(QBrush(empty_color))
                 painter.drawPolygon(star_polygon)
 
+        
         # Determine how many stars are completely filled and if there is a partially filled star
+        print(type(self.rating))
         full_stars = int(self.rating)
         partial_star_ratio = self.rating - full_stars
 
@@ -463,9 +468,10 @@ class RatingWidget(QWidget):
 
 class ProductListPage(QWidget):
     """Page to display a scrollable list of product boxes with additional features."""
-    def __init__(self, username):
+    def __init__(self, main_window, username):
         super().__init__()
         self.username = username  # Store the logged-in username
+        self.main_window=main_window
         self.current_currency = "USD"  # Default currency
         self.exchange_rates = self.fetch_exchange_rates()
         self.currency_symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
@@ -514,7 +520,7 @@ class ProductListPage(QWidget):
 
         # Fetch products from the database and add to the content layout
         products = send_command("view_products")
-        for product in products:
+        for product in products["content"]:
             product_id, name, description, price, owner, rating, quantity = product
             product_widget = ProductWidget(product_id, name, description, price, owner, rating, quantity)
             self.content_layout.addWidget(product_widget)
