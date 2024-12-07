@@ -21,17 +21,21 @@ def send_command(command, data=None):
     client.send(json.dumps(message).encode('utf-8'))
     while len(responses)==0:
         time.sleep(0.1)
-    return responses.pop()
+    x=responses.pop()
+    return x
 
 # Function to listen for incoming messages
 def listen_for_responses():
     while True:
         try:
-            message = client.recv(1024).decode('utf-8')
-            if message.startswith("\nNew message from"):
-                print(message) 
-            else:
-                responses.append(message)
+            response = client.recv(1024).decode('utf-8')
+            data = json.loads(response)
+            if data["type"]==0: #Command Reply
+                responses.append(data)
+            elif data["type"]==1: #Message
+                messages.append(data)
+            elif data["type"]==2: #Notification
+                notifs.append(data)
         except BlockingIOError:
             time.sleep(0.1)  
         except:
@@ -42,6 +46,8 @@ client = socket(AF_INET, SOCK_STREAM)
 client.connect(('localhost', 8888))
 
 responses=[]
+messages=[]
+notifs=[]
 listener_thread = threading.Thread(target=listen_for_responses, daemon=True)
 listener_thread.start()
 
@@ -161,11 +167,11 @@ class RegistrationPage(QWidget):
 
         if name and email and username and password:
             response =send_command("register", registration_data)
-            if response.get("status") == "success":
-                QMessageBox.information(self, "Success", "Registration successful! Please login.")
+            if  not response["error"]:
+                QMessageBox.information(self, "Success", response["content"])
                 self.main_window.set_page(EntryPage(self.main_window))
         else:
-            QMessageBox.critical(self, "Error", response.get("message", "Registration failed"))
+            QMessageBox.critical(self, "Error", response["content"])
         
     def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
@@ -214,12 +220,12 @@ class LoginPage(QWidget):
         
         if username and password:
             response = send_command("login", login_data)
-            if response.get("status") == "success":
-                QMessageBox.information(self, "Success", "Login successful!")
+            if not response["error"]:
+                QMessageBox.information(self, "Success", response["content"])
                 self.parent().username = username  # Store logged-in username
-                self.main_window.set_page(ProductListPage(self.main_window))
+                self.main_window.set_page(ProductListPage(self.main_window,username))
             else:
-                QMessageBox.warning(self, "Error", response.get("message", "Invalid credentials."))
+                QMessageBox.warning(self, "Error", response["content"])
         else:
             QMessageBox.warning(self, "Error", "Please fill in all fields.")
 
@@ -583,7 +589,7 @@ class ProductListPage(QWidget):
         self.chat_animation.setDuration(300)
         self.chat_animation.valueChanged.connect(self.update_chat_button_position)
         self.chat_animation.start()
-        self.chat_button.update()  # Force repaint
+        self.chat_button.update()
 
     def update_chat_button_position(self):
         """Update the chat button position to align with the chat panel."""
