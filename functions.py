@@ -50,11 +50,9 @@ def client_handler(client_socket):
             elif data["command"] == "quit":
                 online_users[username]=None
                 break
-            else:
-                response = "Invalid command"
 
             # Send the response back to the client
-            client_socket.send(response.encode('utf-8'))
+            client_socket.send(json.dumps(response).encode('utf-8'))
 
         except ConnectionResetError:
             print("Client disconnected")
@@ -75,9 +73,9 @@ def register_user(data):
         """, (data["username"], data["password"], data["email"], data["name"]))
         conn.commit()
         conn.close()
-        return {"status": "success", "message": "User registered successfully"}
+        return {"type":0,"error": False, "content": "User registered successfully. Please login."}
     except sqlite3.IntegrityError:
-        return {"status": "error", "message": "Username already exists"}
+        return {"type":0,"error": True, "content": "Username already exists."}
 
 def login_user(data):
     conn = sqlite3.connect("auboutique.db")
@@ -88,9 +86,9 @@ def login_user(data):
     user = cursor.fetchone()
     conn.close()
     if user:
-        return {"status": "success", "message": "Login successful"}
+        return {"type":0,"error": False, "content": "Login successful"}
     else:
-        return {"status": "error", "message": "Invalid username or password"}
+        return {"type":0,"error": True, "content": "Invalid username or password"}
     
 def fetch_products():
     """Fetch products from the SQLite database."""
@@ -103,7 +101,7 @@ def fetch_products():
     """)
     products = cursor.fetchall()
     conn.close()
-    return products
+    return {"type":0, "error":False, "constent":products}
 
 def rate_product(data):
     conn = sqlite3.connect("auboutique.db")
