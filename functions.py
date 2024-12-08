@@ -25,7 +25,7 @@ def client_handler(client_socket):
                     online_users[username] = None
             elif data["command"] == "login":
                 response = login_user(data)
-                if response == "Login successful":
+                if response["content"] == "Login successful":
                     username = data["username"]
                     online_users[username] = client_socket 
                     #pending_msgs = get_pending_messages(username)
@@ -49,13 +49,19 @@ def client_handler(client_socket):
                 response = fetch_products()
             elif data["command"] == "view_products_by_owner":
                 response = view_products_by_owner(data)
-            #elif data["command"] == "check_online_status":
-                #response = check_online_status(data)
-            #elif data["command"] == "send_message":
-                #response = send_message(username, data["owner"], data["message"])
+            elif data["command"] == "fetch_users":
+                response = fetch_users(username) 
+            elif data["command"] == "check_online_status":
+                response = check_online_status(data) 
+            elif data["command"] == "fetch_chats_between_users":
+                response = fetch_chats_between_users(username,data["other"]) 
+            elif data["command"] == "store_message":
+                response = store_message(data)
             elif data["command"] == "quit":
                 online_users[username]=None
                 break
+            else:
+                response= {"error": True, "message": "Unknown command"}
 
             # Send the response back to the client
             client_socket.send(json.dumps(response).encode('utf-8'))
@@ -286,3 +292,105 @@ def checkout(data):
     conn.close()
 
     return {"type": 0, "error": False, "content": "Checkout successful"}
+
+def fetch_users(username):
+    """
+    Fetch all users
+    """
+    conn = sqlite3.connect("auboutique.db")
+    cursor = conn.cursor()
+
+    # Query to fetch all users except the current user
+    query = """
+    SELECT username
+    FROM users
+    WHERE username != ?
+    ORDER BY username ASC;
+    """
+    cursor.execute(query, (username,))
+    results = cursor.fetchall()
+
+    conn.close()
+
+    # Prepare the response
+    response = []
+    for row in results:
+        chat_partner = row[0]
+        response.append({
+            "owner": chat_partner,
+        })
+
+    return {"type": 0, "error": False, "content": response}
+
+
+def check_online_status(data):
+    """
+    Check if a specific user is online and return their IP and port.
+    """
+    username = data["username"]
+    if username in online_users:
+        ip_address, port = online_users[username].getpeername()  # Retrieve IP and port
+        return {"type": 0, "error": False, "content": {"is_online": True, "ip_address": ip_address, "port": port}}
+    else:
+        return {"type": 0, "error": False, "content": {"is_online": False}}
+
+
+def store_message(data):
+    """
+    Store a message in the database. Mark as unsent if the recipient is offline.
+    """
+    sender = data["sender"]
+    receiver = data["receiver"]
+    message = data["message"]
+    sent = data["sent"]
+    timestamp = data["time"]
+
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        # Insert message into the messages table
+        query = """
+        INSERT INTO messages (sender, receiver, message, sent, time)
+        VALUES (?, ?, ?, ?, ?)
+        """
+        cursor.execute(query, (sender, receiver, message, sent, timestamp))
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "content": "Message stored successfully."}
+    except Exception as e:
+        return {"type": 0, "error": True, "content": f"Failed to store message: {str(e)}"}
+
+
+def fetch_chats_between_users(user1, user2):
+    """
+    Fetch the chat history between two users.
+    """
+    conn = sqlite3.connect("auboutique.db")
+    cursor = conn.cursor()
+    
+    # Query to fetch messages exchanged between two users
+    query = """
+    SELECT sender, receiver, message, sent, time
+    FROM messages
+    WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
+    ORDER BY time ASC;
+    """
+    cursor.execute(query, (user1, user2, user2, user1))
+    results = cursor.fetchall()
+    
+    # Prepare the response
+    response = []
+    for row in results:
+        sender, receiver, message, sent, time = row
+        response.append({
+            "sender": sender,
+            "receiver": receiver,
+            "message": message,
+            "sent": bool(sent),
+            "time": time
+        })
+    
+    return {"type":0,"error": False, "content": response}
+

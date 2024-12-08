@@ -1,5 +1,5 @@
 from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
-    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget 
+    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint
 from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon
@@ -22,6 +22,7 @@ def send_command(command, data=None):
     while len(responses)==0:
         time.sleep(0.1)
     x=responses.pop()
+    
     return x
 
 # Function to listen for incoming messages
@@ -597,7 +598,6 @@ class RatingWidget(QWidget):
 
         
         # Determine how many stars are completely filled and if there is a partially filled star
-        print(type(self.rating))
         full_stars = int(self.rating)
         partial_star_ratio = self.rating - full_stars
 
@@ -735,7 +735,7 @@ class ProductListPage(QWidget):
         main_layout.addLayout(content_area_layout)
 
         # Chat panel
-        self.chat_panel = ChatPanel(self)
+        self.chat_panel = ChatPanel(self.username,self)
         self.chat_panel.setGeometry(800, 0, 0, 600)  # Initially hidden
         self.chat_animation = QPropertyAnimation(self.chat_panel, b"geometry")
 
@@ -887,8 +887,9 @@ class CartPage(QWidget):
 
 class ChatPanel(QWidget):
     """Sliding chat panel with recent chats and full chat functionality."""
-    def __init__(self, parent=None):
+    def __init__(self, current_user, parent=None):
         super().__init__(parent)
+        self.current_user = current_user
         self.setStyleSheet("""
             QWidget {
                 background-color: #f1f1f1;
@@ -916,13 +917,9 @@ class ChatPanel(QWidget):
 
         # Add recent chats view by default
         self.recent_chats_widget = self.build_recent_chats_view()
-        self.chat_area_widget = self.build_chat_area_view()
-
-        # Start with the recent chats visible
-        self.chat_area_widget.setVisible(False)
+        self.chat_area_widget = None
 
         self.main_layout.addWidget(self.recent_chats_widget)
-        self.main_layout.addWidget(self.chat_area_widget)
 
     def build_recent_chats_view(self):
         """Build the recent chats list view."""
@@ -937,77 +934,181 @@ class ChatPanel(QWidget):
 
         # Recent chats list
         self.recent_chats_list = QListWidget()
-        self.recent_chats_list.addItem("Owner 1")
-        self.recent_chats_list.addItem("Owner 2")
-        self.recent_chats_list.addItem("Owner 3")
-        self.recent_chats_list.itemClicked.connect(self.load_chat)
+        self.fetch_recent_chats()  # Fetch and populate the recent chats
         layout.addWidget(self.recent_chats_list)
 
         return widget
+    
+    def fetch_recent_chats(self):
+        """Fetch recent chats from the server and update the UI."""
+        response = send_command("fetch_users", {"username": self.current_user})
+        if not response["error"]:
+            chats = response["content"]
+            self.recent_chats_list.clear()
+    
+            for chat in chats:
+                owner = chat["owner"]
+    
+                # Create a custom item for the chat
+                item_widget = QWidget()
+                item_layout = QVBoxLayout(item_widget)
+    
+                user_box = QFrame()
+                user_box.setStyleSheet("""
+                    QFrame {
+                        border: 1px solid #ccc;
+                        border-radius: 10px;
+                        background-color: #f9f9f9;
+                        padding: 10px;
+                    }
+                """)
+                user_box_layout = QHBoxLayout(user_box)  
+                
+                # Owner name
+                owner_label = QLabel(owner)
+                owner_label.setStyleSheet("font-size: 16px; font-weight: bold;")
+                user_box_layout.addWidget(owner_label, alignment=Qt.AlignLeft)
+    
+                # Check Online Status Button (on the left)
+                check_button = QPushButton("Check if Online")
+                check_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                """)
+                check_button.clicked.connect(lambda _, owner=owner: self.check_online_status(owner))
+                user_box_layout.addWidget(check_button, alignment=Qt.AlignLeft)
+    
+                # Chat Button (on the right)
+                chat_button = QPushButton("Chat")
+                chat_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #4CAF50;
+                        color: white;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #45a049;
+                    }
+                """)
+                chat_button.clicked.connect(lambda _, owner=owner: self.load_chat(self.current_user, owner))
+                user_box_layout.addWidget(chat_button, alignment=Qt.AlignRight)
+    
+                # Finalize layout
+                item_layout.addWidget(user_box)
+                item_widget.setLayout(item_layout)
+    
+                list_item = QListWidgetItem()
+                list_item.setSizeHint(item_widget.sizeHint())
+                self.recent_chats_list.addItem(list_item)
+                self.recent_chats_list.setItemWidget(list_item, item_widget)
+        else:
+            QMessageBox.warning(self, "Error", "Failed to fetch recent chats.")
 
-    def build_chat_area_view(self):
-        """Build the chat area view."""
+
+    def check_online_status(self, user):
+        """Check if the specified user is online."""
+        response = send_command("check_online_status", {"username": user})
+        if not response["error"]:
+            is_online = response["content"]["is_online"]
+            status_message = f"{user} is {'Online' if is_online else 'Offline'}."
+            QMessageBox.information(self, "Online Status", status_message)
+        else:
+            QMessageBox.warning(self, "Error", "Failed to check online status.")
+            
+            
+    def build_chat_area_view(self, current_user, chat_with):
+        """Build a dynamic chat area view for a specific user."""
         widget = QWidget()
         layout = QVBoxLayout(widget)
-
+    
         # Chat header with back button and owner name
         chat_header_layout = QHBoxLayout()
         self.back_button = QPushButton("←")
         self.back_button.setFixedSize(40, 40)
         self.back_button.clicked.connect(self.show_recent_chats)
         chat_header_layout.addWidget(self.back_button)
-
-        self.chat_owner_label = QLabel("Chat with [Owner]")
+    
+        self.chat_owner_label = QLabel(f"Chat with {chat_with}")
         self.chat_owner_label.setStyleSheet("font-size: 16px; font-weight: bold;")
         chat_header_layout.addWidget(self.chat_owner_label)
-
-        chat_header_layout.addStretch()  # Push the label to the left
+    
+        chat_header_layout.addStretch()
         layout.addLayout(chat_header_layout)
-
-        # Chat history (scrollable area)
+    
+        # Chat history
         self.chat_history = QScrollArea()
         self.chat_history.setWidgetResizable(True)
         self.chat_content = QWidget()
         self.chat_content_layout = QVBoxLayout(self.chat_content)
         self.chat_content_layout.setAlignment(Qt.AlignTop)
         self.chat_history.setWidget(self.chat_content)
-
+    
+        # Fetch chat data from the server
+        response = send_command("fetch_chats_between_users", {"other": chat_with})
+        
+        if not response["error"]:
+            chat_data = response["content"]
+    
+            for msg in chat_data:
+                sender = msg["sender"]
+                message = msg["message"]
+                is_sent_by_current_user = (sender == current_user)
+                
+                self.add_chat_bubble(sender, message, is_sent_by_current_user)
+        else:
+            QMessageBox.warning(self, "Error", "Failed to load chat messages.")
+    
         layout.addWidget(self.chat_history)
-
-        # Dummy chat messages
-        self.add_chat_bubble("Owner", "Hello! How can I help you today?", False)
-        self.add_chat_bubble("You", "Hi, I need some information regarding the product.", True)
-        self.add_chat_bubble("Owner", "Sure! What would you like to know?", False)
-
+    
         # Message input area
         input_layout = QHBoxLayout()
-
-        # Text box for entering messages
         self.message_input = QLineEdit()
         self.message_input.setPlaceholderText("Type your message here...")
         input_layout.addWidget(self.message_input, stretch=2)
-
-        # Send button
+    
         self.send_button = QPushButton("➤")
         self.send_button.setFixedSize(40, 40)
-        self.send_button.clicked.connect(self.send_message)
+        self.send_button.clicked.connect(lambda: self.send_message(current_user, chat_with))
         input_layout.addWidget(self.send_button)
-
-        # Audio and photo buttons
-        self.audio_button = QPushButton()
-        self.audio_button.setIcon(QIcon("audio_icon.png"))  # Replace with actual audio icon path
-        self.audio_button.setFixedSize(40, 40)
-        input_layout.addWidget(self.audio_button)
-
-        self.photo_button = QPushButton()
-        self.photo_button.setIcon(QIcon("photo_icon.png"))  # Replace with actual photo icon path
-        self.photo_button.setFixedSize(40, 40)
-        input_layout.addWidget(self.photo_button)
-
+    
         layout.addLayout(input_layout)
-
         return widget
 
+
+    def load_chat(self, current_user, chat_with):
+        """Load a chat area for the specified user."""
+        if self.chat_area_widget:
+            self.main_layout.removeWidget(self.chat_area_widget)
+            self.chat_area_widget.deleteLater()
+
+        self.chat_area_widget = self.build_chat_area_view(current_user, chat_with)
+        self.main_layout.addWidget(self.chat_area_widget)
+
+        self.recent_chats_widget.setVisible(False)
+        self.chat_area_widget.setVisible(True)
+
+        self.parent().update_chat_button_position()
+        
+    def listen_for_new_messages(self):
+        """Continuously check for new messages and update the chat."""
+        while True:
+            if messages:
+                new_message = messages.pop(0)
+                sender = new_message["sender"]
+                recipient = new_message["recipient"]
+                content = new_message["message"]
+                if recipient == self.current_user:  # Message meant for this user
+                    self.add_chat_bubble(sender, content, is_user=False)
+            time.sleep(0.1)
+            
     def add_chat_bubble(self, sender, message, is_user):
         """Add a chat bubble to the chat history."""
         bubble_layout = QHBoxLayout()
@@ -1046,31 +1147,76 @@ class ChatPanel(QWidget):
         search_text = self.search_bar.text().lower()
         for i in range(self.recent_chats_list.count()):
             item = self.recent_chats_list.item(i)
-            item.setHidden(search_text not in item.text().lower())
+            widget = self.recent_chats_list.itemWidget(item)
+            if widget:
+                owner_label = widget.findChild(QLabel)
+                if owner_label and search_text not in owner_label.text().lower():
+                    item.setHidden(True)
+                else:
+                    item.setHidden(False)
 
     def show_recent_chats(self):
         """Show the recent chats list and hide the chat area."""
-        self.chat_area_widget.setVisible(False)
+        if self.chat_area_widget:
+            self.main_layout.removeWidget(self.chat_area_widget)
+            self.chat_area_widget.deleteLater()
+            self.chat_area_widget = None
+
         self.recent_chats_widget.setVisible(True)
-        self.parent().update_chat_button_position()  
 
-    def load_chat(self, item):
-        """Load the selected chat's history."""
-        self.recent_chats_widget.setVisible(False)
-        self.chat_area_widget.setVisible(True)
-        self.parent().update_chat_button_position()  
+        # Ensure the chat toggle button is updated
+        self.parent().update_chat_button_position()
 
-    def send_message(self):
-        """Send a new message."""
-        message = self.message_input.text()
-        if message:
-            # Append the message to the chat content
-            current_text = self.chat_content.text()
-            new_text = f"{current_text}\nYou: {message}"
-            self.chat_content.setText(new_text)
 
-            # Clear the input box
-            self.message_input.clear()
+    def send_message(self, sender, recipient):
+        """Send a message to the recipient using their IP address and port."""
+        message_text = self.message_input.text()
+        if not message_text:
+            QMessageBox.warning(self, "Error", "Message cannot be empty.")
+            return
+    
+        # Check if the recipient is online
+        response = send_command("check_online_status", {"username": recipient})
+        if not response["error"]:
+            is_online = response["content"]["is_online"]
+            if is_online:
+                ip_address = response["content"]["ip_address"]
+                port = response["content"]["port"]
+                try:
+                    # Establish a temporary socket connection to send the message
+                    with socket(AF_INET, SOCK_STREAM) as temp_socket:
+                        temp_socket.connect((ip_address, port))
+                        print("Connected")
+                        message_data = {
+                            "sender": sender,
+                            "recipient": recipient,
+                            "sent":True,
+                            "message": message_text,
+                            "time": time.time(),
+                        }
+                        temp_socket.send(json.dumps(message_data).encode('utf-8'))
+                        self.add_chat_bubble(sender, message_text, True)
+                        send_command("store_message", message_data)
+                except Exception as e:
+                    QMessageBox.critical(self, "Error", f"Failed to send message: {str(e)}")
+            else:
+                # Add the message to the database as pending
+                message_data = {
+                    "sender": sender,
+                    "receiver": recipient,
+                    "message": message_text,
+                    "sent": False,
+                    "time": time.time(),
+                }
+                self.add_chat_bubble(sender, message_text, True)
+                send_command("store_message", message_data)
+        else:
+            QMessageBox.critical(self, "Error", "Failed to check online status.")
+    
+        # Clear the message input area after sending
+        self.message_input.clear()
+
+
 
 class MainWindow(QMainWindow):
     def __init__(self):
