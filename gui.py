@@ -380,12 +380,163 @@ class ProductWidget(QFrame):
         if ok:
             # Prepare the data to be sent to the server
             rating_data = {
-                "rating": rating,  # Correct dictionary syntax
-                "product_id": self.product_id  # Use the provided product ID
+                "username": self.username,  # Pass the logged-in user's username
+                "product_id": self.product_id,
+                "rating": rating
             }
+    
             # Send the command to the server
             response = send_command("rate", rating_data)
-            self.rating_widget.update_rating(response["content"])
+    
+            if not response["error"]:
+                # Update the rating widget with the new average rating
+                new_average_rating = response["content"]
+                self.rating_widget.update_rating(new_average_rating)
+            else:
+                QMessageBox.warning(self, "Error", "Failed to rate the product.")
+
+
+class AddProductPage(QWidget):
+    def __init__(self, main_window, username):
+        super().__init__()
+        self.main_window = main_window
+        self.username = username
+
+        layout = QVBoxLayout()
+
+        header = QLabel("Add Product")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)
+        layout.addWidget(header)
+
+        # Input fields
+        self.name_input = QLineEdit(self)
+        self.name_input.setPlaceholderText("Product Name")
+        self.description_input = QLineEdit(self)
+        self.description_input.setPlaceholderText("Description")
+        self.price_input = QLineEdit(self)
+        self.price_input.setPlaceholderText("Price")
+        self.quantity_input = QLineEdit(self)
+        self.quantity_input.setPlaceholderText("Quantity")
+
+        layout.addWidget(self.name_input)
+        layout.addWidget(self.description_input)
+        layout.addWidget(self.price_input)
+        layout.addWidget(self.quantity_input)
+
+        # Submit button
+        submit_button = QPushButton("Add Product")
+        submit_button.clicked.connect(self.add_product)
+        layout.addWidget(submit_button)
+
+        back_button = QPushButton("Cancel")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
+
+        self.setLayout(layout)
+
+    def add_product(self):
+        name = self.name_input.text()
+        description = self.description_input.text()
+        price = self.price_input.text()
+        quantity = self.quantity_input.text()
+
+        if not (name and description and price and quantity):
+            QMessageBox.warning(self, "Error", "All fields must be filled.")
+            return
+
+        try:
+            price = float(price)
+            quantity = int(quantity)
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Invalid price or quantity format.")
+            return
+
+        data = {
+            "name": name,
+            "description": description,
+            "price": price,
+            "quantity": quantity,
+            "owner": self.username
+        }
+        response = send_command("add_product", data)
+
+        if response["error"]:
+            QMessageBox.warning(self, "Error", response["content"])
+        else:
+            QMessageBox.information(self, "Success", response["content"])
+            self.main_window.set_page(ProductListPage(self.main_window, self.username))
+
+    def go_back(self):
+        self.main_window.set_page(ProductListPage(self.main_window, self.username))
+
+
+
+class MyProductsPage(QWidget):
+    def __init__(self, main_window, username):
+        super().__init__()
+        self.main_window = main_window
+        self.username = username
+
+        layout = QVBoxLayout()
+
+        header = QLabel("My Products")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)
+        layout.addWidget(header)
+
+        # Scrollable area for products
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+
+        content_widget = QWidget()
+        content_layout = QVBoxLayout(content_widget)
+
+        # Fetch and display user's products
+        try:
+            data = {"username": self.username}
+            response = send_command("view_products_by_owner", data)
+
+            if response["error"]:
+                QMessageBox.warning(self, "Error", response["content"])
+            else:
+                products = response["content"]
+                for product in products:
+                    try:
+                        product_id, name, description, price, quantity, owner_username = product
+                        product_label = QLabel(
+                            f"Name: {name}\nDescription: {description}\nPrice: ${price:.2f}\n"
+                            f"Quantity: {quantity}\nOwner: {owner_username}"
+                        )
+                        product_label.setStyleSheet("""
+                            QLabel {
+                                background-color: #f9f9f9;
+                                border: 1px solid #ccc;
+                                border-radius: 5px;
+                                padding: 10px;
+                                margin: 5px 0;
+                            }
+                        """)
+                        content_layout.addWidget(product_label)
+                    except ValueError as e:
+                        QMessageBox.critical(self, "Error", f"Unexpected data format: {str(e)}")
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to load products: {str(e)}")
+
+        content_widget.setLayout(content_layout)
+        scroll_area.setWidget(content_widget)
+        layout.addWidget(scroll_area)
+
+        # Back button
+        back_button = QPushButton("Back")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
+
+        self.setLayout(layout)
+
+    def go_back(self):
+        self.main_window.set_page(ProductListPage(self.main_window, self.username))
+
 
 class RatingWidget(QWidget):
     """Widget to display rating as stars."""
@@ -491,8 +642,8 @@ class ProductListPage(QWidget):
         self.username_button = QPushButton(self.username)
         self.username_button.setStyleSheet("font-size: 14px; font-weight: bold; color: #333;")
         menu = QMenu()
-        menu.addAction("My Products")
-        menu.addAction("Add Product")
+        menu.addAction("My Products").triggered.connect(lambda: self.main_window.set_page(MyProductsPage(self.main_window, self.username)))
+        menu.addAction("Add Product").triggered.connect(lambda: self.main_window.set_page(AddProductPage(self.main_window, self.username)))
         menu.addAction("Log out")
         self.username_button.setMenu(menu)
         header_layout.addWidget(self.username_button, stretch=0)  # No stretch for the username button

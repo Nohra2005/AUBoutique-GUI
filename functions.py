@@ -41,14 +41,14 @@ def client_handler(client_socket):
                 response = remove_from_cart(data)
             elif data["command"] == "checkout":
                 response = checkout(data)
-            #elif data["command"] == "add_product":
-                #response = add_product(data)
+            elif data["command"] == "add_product":
+                response = add_product(data)
             #elif data["command"] == "view_buyers":
                 #response = view_buyers(username)
             elif data["command"] == "view_products":
                 response = fetch_products()
-            #elif data["command"] == "view_products_by_owner":
-                #response = view_products_by_owner(data)
+            elif data["command"] == "view_products_by_owner":
+                response = view_products_by_owner(data)
             #elif data["command"] == "check_online_status":
                 #response = check_online_status(data)
             #elif data["command"] == "send_message":
@@ -66,6 +66,46 @@ def client_handler(client_socket):
             break
 
     client_socket.close()
+
+
+def view_products_by_owner(data):
+    """Fetch all products owned by the logged-in user."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        # Query to fetch relevant columns including owner_username
+        cursor.execute("""
+            SELECT product_id, name, description, price, quantity, owner_username
+            FROM products
+            WHERE owner_username = ?
+        """, (data["username"],))
+        products = cursor.fetchall()
+        conn.close()
+
+        return {"type": 0, "error": False, "content": products}
+    except Exception as e:
+        return {"type": 0, "error": True, "content": f"Failed to fetch products: {str(e)}"}
+
+
+def add_product(data):
+    """Add a new product to the database."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        # Insert product details into the database
+        cursor.execute("""
+            INSERT INTO products (name, description, price, quantity, owner_username)
+            VALUES (?, ?, ?, ?, ?)
+        """, (data["name"], data["description"], data["price"], data["quantity"], data["owner"]))
+
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "content": "Product added successfully."}
+    except Exception as e:
+        return {"type": 0, "error": True, "content": f"Failed to add product: {str(e)}"}
 
 
 # Server functionalities
@@ -112,18 +152,44 @@ def fetch_products():
 def rate_product(data):
     conn = sqlite3.connect("auboutique.db")
     cursor = conn.cursor()
+
+    user_username = data["username"]
+    product_id = data["product_id"]
+    rating = data["rating"]
+
+    # Insert or update the user's rating for the product
+    cursor.execute("""
+        INSERT INTO ratings (user_username, product_id, rating)
+        VALUES (?, ?, ?)
+        ON CONFLICT(user_username, product_id)
+        DO UPDATE SET rating = excluded.rating
+    """, (user_username, product_id, rating))
+
+    # Recalculate the average rating for the product
     cursor.execute("""
         UPDATE products
-        SET average_rating = (average_rating * review_count + ?) / (review_count + 1),
-            review_count = review_count + 1
+        SET average_rating = (
+            SELECT AVG(rating)
+            FROM ratings
+            WHERE product_id = ?
+        ),
+        review_count = (
+            SELECT COUNT(*)
+            FROM ratings
+            WHERE product_id = ?
+        )
         WHERE product_id = ?
-    """, (data["rating"], data["product_id"]))
-    conn.commit()
+    """, (product_id, product_id, product_id))
 
-    cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (data["product_id"],))
-    rating = cursor.fetchone()[0]
+    # Fetch the updated average rating
+    cursor.execute("SELECT average_rating FROM products WHERE product_id = ?", (product_id,))
+    new_average_rating = cursor.fetchone()[0]
+
+    conn.commit()
     conn.close()
-    return {"type":0,"error":False,"content":float(rating)}
+
+    return {"type": 0, "error": False, "content": float(new_average_rating)}
+
 
 def add_to_cart(data):
     username = data.get('username')
