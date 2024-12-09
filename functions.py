@@ -7,6 +7,7 @@ online_users = {}
 
 def client_handler(client_socket):
     username = None
+    print("in client handler")
     while True:
         try:
             # Receive and decode the client's message
@@ -35,6 +36,7 @@ def client_handler(client_socket):
                 response = rate_product(data)
             elif data["command"] == "add_to_cart":
                 response = add_to_cart(data)
+                print("response recorded")
             elif data["command"] == "view_cart":
                 response = view_cart(data)
             elif data["command"] == "remove_from_cart":
@@ -64,8 +66,10 @@ def client_handler(client_socket):
                 response= {"error": True, "message": "Unknown command"}
 
             # Send the response back to the client
+            print("about to send the add_to_cart response")
             client_socket.send(json.dumps(response).encode('utf-8'))
-
+            print("sent")
+ 
         except ConnectionResetError:
             print("Client disconnected")
             online_users[username]=None
@@ -198,101 +202,211 @@ def rate_product(data):
 
 
 def add_to_cart(data):
-    username = data.get('username')
-    product_id = data.get('product_id')
+    """Adds a product to the user's cart in the database."""
+    try:
+        # Connect to the database
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
 
-    # Connect to the database
-    conn = sqlite3.connect('auboutique.db')
-    cursor = conn.cursor()
+        print("Command received, in add to cart")
 
-    # Check if the product already exists in the user's cart
-    cursor.execute("""
-        SELECT * FROM carts WHERE username = ? AND product_id = ?
-    """, (username, product_id))
-    result = cursor.fetchone()
+        # Extract input data
+        username = data["username"]
+        product_id = str(data["product_id"])  # Ensure product_id is a string for JSON compatibility
 
-    if result:
-        # Product is already in the cart, increment the quantity
-        cursor.execute("""
-            UPDATE carts SET quantity = quantity + 1 WHERE username = ? AND product_id = ?
-        """, (username, product_id))
-        response = {"type":0, "error": False, "content": "Product quantity updated in cart."}
-    else:
-        # Add the product to the cart with initial quantity 1
-        cursor.execute("""
-            INSERT INTO carts (username, product_id, quantity) VALUES (?, ?, ?)
-        """, (username, product_id, 1))
-        response = {"type":0, "error": False, "content": "Product added to cart."}
+        # Fetch the user's existing cart
+        cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
+        result = cursor.fetchone()
 
-    # Commit changes and close connection
-    conn.commit()
-    conn.close()
+        # Print the raw result for debugging
+        print(f"Raw database query result: {result}")
 
-    return response
+        # Check and process the result
+        if result is None:  # No record found for the username
+            cart_dict = {}
+            print("No cart found for user, initializing new cart")
+        elif isinstance(result, tuple) and len(result) > 0 and result[0]:  # Valid tuple with cart data
+            cart_dict = json.loads(result[0])  # Load JSON into a dictionary
+            print(f"Loaded cart: {cart_dict}")
+        else:  # Edge case: result exists but is empty
+            cart_dict = {}
+            print("Cart found but is empty, initializing new cart")
+
+        # Update the cart
+        if product_id in cart_dict:
+            cart_dict[product_id] += 1  # Increment quantity
+            print(f"Product {product_id} found, incremented quantity")
+        else:
+            cart_dict[product_id] = 1  # Add new product
+            print(f"Product {product_id} not found, added to cart")
+
+        # Serialize updated cart to JSON
+        cart_list = json.dumps(cart_dict)
+        print(f"Updated cart (serialized): {cart_list}")
+
+        # Insert or update the cart in the database
+        cursor.execute(
+            "INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)",
+            (username, cart_list),
+        )
+        conn.commit()
+        print("Cart updated in database successfully")
+
+        # Close the database connection
+        conn.close()
+
+        # Return success response
+        return {"type": 0, "error": False, "content": "Product added to cart"}
+
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        if conn:
+            conn.close()
+        # Return error response
+        return {"type": 0, "error": True, "content": "Product could not be added to the cart"}
 
 def view_cart(data):
-    username = data["username"]
-    conn = sqlite3.connect("auboutique.db")
-    cursor = conn.cursor()
+    """Fetches the user's cart and returns the cart items."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+        print("we are in view_cart")
+        username = data["username"]
+        print(f"Fetching cart for username: {username}")
 
-    cursor.execute("""
-        SELECT p.product_id, p.name, p.price, c.quantity
-        FROM products p
-        JOIN carts c ON p.product_id = c.product_id
-        WHERE c.username = ?
-    """, (username,))
-    cart_items = cursor.fetchall()
-    conn.close()
+        # Fetch the user's cart
+        cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
+        result = cursor.fetchone()
+        print(f"Fetched cart data: {result}")
 
-    # Format the result as a list of dictionaries
-    cart = [{"product_id": item[0], "name": item[1], "price": item[2], "quantity": item[3]} for item in cart_items]
+        if result and result[0]:
+            print("Cart data found, loading it into a dictionary")
+            cart_dict = json.loads(result[0])  # Load the cart as a dictionary
+        else:
+            print("No cart data found, initializing empty cart")
+            cart_dict = {}  # Empty cart if no data found
 
-    return {"type": 0, "error": False, "content": cart}
+        print("Fetching product details for each cart item...")
+        cart_items = []
+        for product_id, quantity in cart_dict.items():
+            print(f"Fetching product details for product_id: {product_id}")
+            cursor.execute("SELECT name, price FROM products WHERE product_id = ?", (product_id,))
+            product_result = cursor.fetchone()
+            if product_result:
+                name, price = product_result
+                print(f"Fetched product: {name}, price: {price}, quantity: {quantity}")
+                cart_items.append({
+                    "product_id": int(product_id),
+                    "name": name,
+                    "price": price,
+                    "quantity": quantity
+                })
+            else:
+                print(f"Product with product_id {product_id} not found in database.")
+
+        print("Successfully fetched products")
+        conn.close()
+        return {"type": 0, "error": False, "content": cart_items}
+
+    except sqlite3.Error as e:
+        print(f"Error occurred while fetching cart: {e}")
+        return {"type": 0, "error": True, "content": "Failed to fetch cart items: " + str(e)}
 
 def remove_from_cart(data):
-    username = data["username"]
-    product_id = data["product_id"]
-    
-    conn = sqlite3.connect("auboutique.db")
-    cursor = conn.cursor()
+    """Removes a product from the user's cart."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
 
-    cursor.execute("""
-        DELETE FROM carts
-        WHERE username = ? AND product_id = ?
-    """, (username, product_id))
+        username = data["username"]
+        product_id = str(data["product_id"])  # Ensure the product ID is treated as a string
 
-    conn.commit()
-    conn.close()
+        # Fetch the user's cart
+        cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
+        result = cursor.fetchone()
 
-    return {"type": 0, "error": False, "content": "Product removed from cart"}
+        if result and result[0]:
+            cart_dict = json.loads(result[0])
+        else:
+            return {"type": 0, "error": True, "content": "Cart is empty or not found."}
+
+        # Remove or decrement the product from the cart
+        if product_id in cart_dict:
+            if cart_dict[product_id] > 1:
+                cart_dict[product_id] -= 1  # Decrement quantity
+            else:
+                del cart_dict[product_id]  # Remove product if quantity is 1
+        else:
+            return {"type": 0, "error": True, "content": "Product not found in cart."}
+
+        # Save updated cart back to the database
+        updated_cart = json.dumps(cart_dict)
+        cursor.execute(
+            "INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)",
+            (username, updated_cart)
+        )
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "content": "Product removed from cart successfully."}
+
+    except sqlite3.Error as e:
+        return {"type": 0, "error": True, "content": "Failed to remove product from cart: " + str(e)}
 
 def checkout(data):
-    username = data["username"]
-    conn = sqlite3.connect("auboutique.db")
-    cursor = conn.cursor()
+    """Completes the checkout process by updating product quantities and clearing the cart."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
 
-    # Process checkout (e.g., reduce product quantity, create order record, etc.)
-    cursor.execute("""
-        SELECT product_id, quantity FROM carts WHERE username = ?
-    """, (username,))
-    cart_items = cursor.fetchall()
+        username = data["username"]
+        print(f"Starting checkout for user: {username}")  # Debugging statement
 
-    for item in cart_items:
-        product_id, quantity = item
-        cursor.execute("""
-            UPDATE products SET quantity = quantity - ? WHERE product_id = ?
-        """, (quantity, product_id))
+        # Fetch the user's cart to get the products and their quantities
+        cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
+        result = cursor.fetchone()
+        print(f"Fetched cart data: {result}")  # Debugging statement
 
-    # Optionally, create an order record, then delete items from the cart
-    cursor.execute("""
-        DELETE FROM carts WHERE username = ?
-    """, (username,))
+        if result and result[0]:
+            cart_dict = json.loads(result[0])
+            print(f"Cart contents: {cart_dict}")  # Debugging statement
+        else:
+            return {"type": 0, "error": True, "content": "Cart is empty or not found."}
 
-    conn.commit()
-    conn.close()
+        # Decrease product quantities in the product table and clear the cart
+        for product_id, quantity in cart_dict.items():
+            print(f"Processing product ID: {product_id}, Quantity: {quantity}")  # Debugging statement
+            cursor.execute("SELECT quantity FROM products WHERE product_id = ?", (product_id,))
+            product_result = cursor.fetchone()
+            print(f"Fetched product details: {product_result}")  # Debugging statement
 
-    return {"type": 0, "error": False, "content": "Checkout successful"}
+            if product_result:
+                available_quantity = product_result[0]
+                print(f"Available quantity for product ID {product_id}: {available_quantity}")  # Debugging statement
+                if available_quantity >= quantity:
+                    # Update product quantity in the products table
+                    new_quantity = available_quantity - quantity
+                    cursor.execute("UPDATE products SET quantity = ? WHERE product_id = ?", (new_quantity, product_id))
+                    print(f"Updated product quantity for product ID {product_id}: {new_quantity}")  # Debugging statement
+                else:
+                    return {"type": 0, "error": True, "content": f"Not enough stock for product ID {product_id}"}
+            else:
+                return {"type": 0, "error": True, "content": f"Product ID {product_id} not found in the database."}
 
+        # Clear the user's cart
+        cursor.execute("INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)", (username, json.dumps({})))
+        print(f"Cleared cart for user: {username}")  # Debugging statement
+        conn.commit()
+        conn.close()
+
+        print("Checkout completed successfully.")  # Debugging statement
+        return {"type": 0, "error": False, "content": "Checkout successful. Cart is now empty."}
+
+    except sqlite3.Error as e:
+        print(f"Error during checkout: {e}")  # Debugging statement
+        return {"type": 0, "error": True, "content": "Failed to complete checkout: " + str(e)}
+
+    
 def fetch_users(username):
     """
     Fetch all users
@@ -393,4 +507,7 @@ def fetch_chats_between_users(user1, user2):
         })
     
     return {"type":0,"error": False, "content": response}
+
+
+
 
