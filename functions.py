@@ -202,34 +202,38 @@ def rate_product(data):
 
 
 def add_to_cart(data):
-    """Adds a product to the user's cart in the database."""
+    """Adds a product to the user's cart, validating cumulative quantity."""
     try:
         conn = sqlite3.connect("auboutique.db")
         cursor = conn.cursor()
 
         username = data["username"]
         product_id = str(data["product_id"])
+        requested_quantity = data["quantity"]
 
-        # Check the product quantity
+        # Check the product's available quantity
         cursor.execute("SELECT quantity FROM products WHERE product_id = ?", (product_id,))
         result = cursor.fetchone()
         if not result:
             return {"type": 0, "error": True, "content": "Product not found."}
         
-        quantity = result[0]
-        if quantity <= 0:
-            return {"type": 0, "error": True, "content": "Product is out of stock."}
+        available_quantity = result[0]
 
         # Fetch the user's cart
         cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
         result = cursor.fetchone()
         cart_dict = json.loads(result[0]) if result and result[0] else {}
 
+        # Check the cumulative quantity (current + requested)
+        current_cart_quantity = cart_dict.get(product_id, 0)
+        if current_cart_quantity + requested_quantity > available_quantity:
+            return {"type": 0, "error": True, "content": f"Quantity exceeded. Only {available_quantity - current_cart_quantity} more can be added."}
+
         # Update the cart
         if product_id in cart_dict:
-            cart_dict[product_id] += 1
+            cart_dict[product_id] += requested_quantity
         else:
-            cart_dict[product_id] = 1
+            cart_dict[product_id] = requested_quantity
 
         # Serialize and save the updated cart
         cart_list = json.dumps(cart_dict)
@@ -238,12 +242,8 @@ def add_to_cart(data):
             (username, cart_list),
         )
 
-        # Decrease the product quantity
-        cursor.execute("UPDATE products SET quantity = quantity - 1 WHERE product_id = ?", (product_id,))
         conn.commit()
-
         return {"type": 0, "error": False, "content": "Product added to cart."}
-
     except sqlite3.Error as e:
         if conn:
             conn.rollback()
@@ -346,51 +346,42 @@ def checkout(data):
         cursor = conn.cursor()
 
         username = data["username"]
-        print(f"Starting checkout for user: {username}")  # Debugging statement
 
-        # Fetch the user's cart to get the products and their quantities
+        # Fetch the user's cart
         cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
         result = cursor.fetchone()
-        print(f"Fetched cart data: {result}")  # Debugging statement
 
         if result and result[0]:
             cart_dict = json.loads(result[0])
-            print(f"Cart contents: {cart_dict}")  # Debugging statement
         else:
             return {"type": 0, "error": True, "content": "Cart is empty or not found."}
 
-        # Decrease product quantities in the product table and clear the cart
+        # Update product quantities
         for product_id, quantity in cart_dict.items():
-            print(f"Processing product ID: {product_id}, Quantity: {quantity}")  # Debugging statement
             cursor.execute("SELECT quantity FROM products WHERE product_id = ?", (product_id,))
             product_result = cursor.fetchone()
-            print(f"Fetched product details: {product_result}")  # Debugging statement
 
             if product_result:
                 available_quantity = product_result[0]
-                print(f"Available quantity for product ID {product_id}: {available_quantity}")  # Debugging statement
                 if available_quantity >= quantity:
-                    # Update product quantity in the products table
                     new_quantity = available_quantity - quantity
                     cursor.execute("UPDATE products SET quantity = ? WHERE product_id = ?", (new_quantity, product_id))
-                    print(f"Updated product quantity for product ID {product_id}: {new_quantity}")  # Debugging statement
+                    if new_quantity == 0:
+                        cursor.execute("DELETE FROM products WHERE product_id = ?", (product_id,))
                 else:
-                    return {"type": 0, "error": True, "content": f"Not enough stock for product ID {product_id}"}
-            else:
-                return {"type": 0, "error": True, "content": f"Product ID {product_id} not found in the database."}
+                    return {"type": 0, "error": True, "content": f"Insufficient stock for product ID {product_id}"}
 
         # Clear the user's cart
         cursor.execute("INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)", (username, json.dumps({})))
-        print(f"Cleared cart for user: {username}")  # Debugging statement
+
         conn.commit()
-        conn.close()
-
-        print("Checkout completed successfully.")  # Debugging statement
         return {"type": 0, "error": False, "content": "Checkout successful. Cart is now empty."}
-
     except sqlite3.Error as e:
-        print(f"Error during checkout: {e}")  # Debugging statement
+        if conn:
+            conn.rollback()
         return {"type": 0, "error": True, "content": "Failed to complete checkout: " + str(e)}
+    finally:
+        conn.close()
 
     
 def fetch_users(username):
