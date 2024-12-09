@@ -204,66 +204,52 @@ def rate_product(data):
 def add_to_cart(data):
     """Adds a product to the user's cart in the database."""
     try:
-        # Connect to the database
         conn = sqlite3.connect("auboutique.db")
         cursor = conn.cursor()
 
-        print("Command received, in add to cart")
-
-        # Extract input data
         username = data["username"]
-        product_id = str(data["product_id"])  # Ensure product_id is a string for JSON compatibility
+        product_id = str(data["product_id"])
 
-        # Fetch the user's existing cart
+        # Check the product quantity
+        cursor.execute("SELECT quantity FROM products WHERE product_id = ?", (product_id,))
+        result = cursor.fetchone()
+        if not result:
+            return {"type": 0, "error": True, "content": "Product not found."}
+        
+        quantity = result[0]
+        if quantity <= 0:
+            return {"type": 0, "error": True, "content": "Product is out of stock."}
+
+        # Fetch the user's cart
         cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
         result = cursor.fetchone()
-
-        # Print the raw result for debugging
-        print(f"Raw database query result: {result}")
-
-        # Check and process the result
-        if result is None:  # No record found for the username
-            cart_dict = {}
-            print("No cart found for user, initializing new cart")
-        elif isinstance(result, tuple) and len(result) > 0 and result[0]:  # Valid tuple with cart data
-            cart_dict = json.loads(result[0])  # Load JSON into a dictionary
-            print(f"Loaded cart: {cart_dict}")
-        else:  # Edge case: result exists but is empty
-            cart_dict = {}
-            print("Cart found but is empty, initializing new cart")
+        cart_dict = json.loads(result[0]) if result and result[0] else {}
 
         # Update the cart
         if product_id in cart_dict:
-            cart_dict[product_id] += 1  # Increment quantity
-            print(f"Product {product_id} found, incremented quantity")
+            cart_dict[product_id] += 1
         else:
-            cart_dict[product_id] = 1  # Add new product
-            print(f"Product {product_id} not found, added to cart")
+            cart_dict[product_id] = 1
 
-        # Serialize updated cart to JSON
+        # Serialize and save the updated cart
         cart_list = json.dumps(cart_dict)
-        print(f"Updated cart (serialized): {cart_list}")
-
-        # Insert or update the cart in the database
         cursor.execute(
             "INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)",
             (username, cart_list),
         )
+
+        # Decrease the product quantity
+        cursor.execute("UPDATE products SET quantity = quantity - 1 WHERE product_id = ?", (product_id,))
         conn.commit()
-        print("Cart updated in database successfully")
 
-        # Close the database connection
-        conn.close()
-
-        # Return success response
-        return {"type": 0, "error": False, "content": "Product added to cart"}
+        return {"type": 0, "error": False, "content": "Product added to cart."}
 
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
         if conn:
-            conn.close()
-        # Return error response
-        return {"type": 0, "error": True, "content": "Product could not be added to the cart"}
+            conn.rollback()
+        return {"type": 0, "error": True, "content": f"Database error: {str(e)}"}
+    finally:
+        conn.close()
 
 def view_cart(data):
     """Fetches the user's cart and returns the cart items."""

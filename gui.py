@@ -293,6 +293,8 @@ class ProductWidget(QFrame):
         description_label = QLabel(self.description)
         description_label.setWordWrap(True)
         description_label.setStyleSheet("font-size: 14px; color: #555;")
+        self.quantity_label = QLabel(f"Quantity: {self.quantity}")
+        self.quantity_label.setStyleSheet("font-size: 14px; color: #333;")
 
         # Average rating and rate button
         rating_layout = QHBoxLayout()
@@ -314,6 +316,7 @@ class ProductWidget(QFrame):
         # Add labels and rate button to the details layout
         details_layout.addWidget(name_label)
         details_layout.addWidget(description_label)
+        details_layout.addWidget(self.quantity_label)
         details_layout.addLayout(rating_layout)
 
         layout.addLayout(details_layout)
@@ -341,6 +344,7 @@ class ProductWidget(QFrame):
         buttons_layout.addStretch()  # Add some space between price and button
         buttons_layout.addWidget(add_to_cart_button)
 
+        
         layout.addLayout(buttons_layout)
 
         self.setLayout(layout)
@@ -353,30 +357,45 @@ class ProductWidget(QFrame):
 
     def add_to_cart(self):
         """Adds a product to the cart."""
-        # Prepare the data to be sent to the server
+        if self.quantity <= 0:
+            QMessageBox.warning(self, "Error", "This product is out of stock.")
+            return
+    
         cart_data = {
             "product_id": self.product_id,
-            "username": self.username  
+            "username": self.username
         }
-        # Send the command to the server
+    
         try:
-            print("command sent")
             response = send_command("add_to_cart", cart_data)
-            print("response recorded")
-            # Handle the server response
             if response["error"]:
                 QMessageBox.warning(self, "Error", response["content"])
             else:
                 QMessageBox.information(self, "Success", response["content"])
+                self.quantity -= 1  # Decrease local quantity
+                self.update_quantity_display()  # Refresh the displayed quantity
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to communicate with the server: {str(e)}")
 
 
     def update_quantity_display(self):
         """Update the displayed quantity in the UI."""
-        details_layout = self.layout().itemAt(0).layout()
-        quantity_label = details_layout.itemAt(details_layout.count() - 1).widget()
-        quantity_label.setText(f"Quantity: {self.quantity}")
+        details_layout = self.layout().itemAt(0).layout()  # Locate the details layout
+        quantity_label = None
+    
+        # Ensure we find the correct quantity label
+        for i in range(details_layout.count()):
+            widget = details_layout.itemAt(i).widget()
+            if isinstance(widget, QLabel) and "Quantity:" in widget.text():
+                quantity_label = widget
+                break
+    
+        if quantity_label:
+            quantity_label.setText(f"Quantity: {self.quantity}")  # Update the quantity
+        else:
+            print("Error: Quantity label not found.")
+
+
     
     def rate(self):
         # Ask the user for a rating (1-5)
@@ -474,6 +493,57 @@ class AddProductPage(QWidget):
     def go_back(self):
         self.main_window.set_page(ProductListPage(self.main_window, self.username))
 
+class MyProductWidget(QFrame):
+    """Widget to display a product owned by the user."""
+    def __init__(self, product_id, name, description, price, quantity, parent=None):
+        super().__init__(parent)
+        self.product_id = product_id
+        self.name = name
+        self.description = description
+        self.price = price
+        self.quantity = quantity
+
+        # Set QFrame styling to look like a box
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShadow(QFrame.Raised)
+        self.setStyleSheet("""
+            QFrame {
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                background-color: #f9f9f9;
+                padding: 15px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #333;
+            }
+        """)
+
+        # Main layout for the product widget
+        layout = QVBoxLayout()
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(10)
+
+        # Name and description
+        name_label = QLabel(self.name)
+        name_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        description_label = QLabel(self.description)
+        description_label.setWordWrap(True)
+        description_label.setStyleSheet("font-size: 14px; color: #555;")
+
+        # Price and quantity
+        price_label = QLabel(f"Price: ${self.price:.2f}")
+        price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        quantity_label = QLabel(f"Quantity: {self.quantity}")
+        quantity_label.setStyleSheet("font-size: 14px; color: #333;")
+
+        # Add labels to the layout
+        layout.addWidget(name_label)
+        layout.addWidget(description_label)
+        layout.addWidget(price_label)
+        layout.addWidget(quantity_label)
+
+        self.setLayout(layout)
 
 
 class MyProductsPage(QWidget):
@@ -506,24 +576,11 @@ class MyProductsPage(QWidget):
             else:
                 products = response["content"]
                 for product in products:
-                    try:
-                        product_id, name, description, price, quantity, owner_username = product
-                        product_label = QLabel(
-                            f"Name: {name}\nDescription: {description}\nPrice: ${price:.2f}\n"
-                            f"Quantity: {quantity}\nOwner: {owner_username}"
-                        )
-                        product_label.setStyleSheet("""
-                            QLabel {
-                                background-color: #f9f9f9;
-                                border: 1px solid #ccc;
-                                border-radius: 5px;
-                                padding: 10px;
-                                margin: 5px 0;
-                            }
-                        """)
-                        content_layout.addWidget(product_label)
-                    except ValueError as e:
-                        QMessageBox.critical(self, "Error", f"Unexpected data format: {str(e)}")
+                    product_id, name, description, price, quantity, owner_username = product
+                    product_widget = MyProductWidget(
+                        product_id, name, description, price, quantity
+                    )
+                    content_layout.addWidget(product_widget)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load products: {str(e)}")
 
