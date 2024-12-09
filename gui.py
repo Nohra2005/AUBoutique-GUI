@@ -352,22 +352,25 @@ class ProductWidget(QFrame):
         self.price_label.setText(f"Price: {self.currency_symbol}{self.price:.2f}")
 
     def add_to_cart(self):
+        """Adds a product to the cart."""
         # Prepare the data to be sent to the server
         cart_data = {
             "product_id": self.product_id,
-            "username": self.username  # Send the username (instead of user_id)
+            "username": self.username  
         }
-
         # Send the command to the server
-        response = send_command("add_to_cart", cart_data)
+        try:
+            print("command sent")
+            response = send_command("add_to_cart", cart_data)
+            print("response recorded")
+            # Handle the server response
+            if response["error"]:
+                QMessageBox.warning(self, "Error", response["content"])
+            else:
+                QMessageBox.information(self, "Success", response["content"])
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to communicate with the server: {str(e)}")
 
-        # Handle the server response (display a message or update the UI accordingly)
-        if response["error"]:
-            # Show error message (e.g., product not added)
-            QMessageBox.warning(self, "Error", response["content"])
-        else:
-            # Show success message (e.g., product added to cart)
-            QMessageBox.information(self, "Success", response["content"])
 
     def update_quantity_display(self):
         """Update the displayed quantity in the UI."""
@@ -815,74 +818,141 @@ class CartPage(QWidget):
         self.main_window = main_window
         self.username = username
         self.setWindowTitle("Your Cart")
-        self.setGeometry(100, 100, 400, 600)  # Set the size and position of the window
+        self.setGeometry(100, 100, 600, 800)
+
+        # Main layout
         self.layout = QVBoxLayout(self)
 
-        # Fetch the cart items from the server
+        # Back button (Top-left)
+        back_button = QPushButton("Back")
+        back_button.setStyleSheet("background-color: lightgray; color: black; font-size: 16px; padding: 5px;")
+        back_button.clicked.connect(self.go_back)
+        self.layout.addWidget(back_button)
+
+        # Header: Add a label to distinguish the product list
+        self.header_label = QLabel("Cart Items")
+        self.header_label.setStyleSheet("font-size: 24px; font-weight: bold; margin-top: 20px; margin-bottom: 10px;")
+        self.layout.addWidget(self.header_label)
+
+        # Cart items layout (where items will be displayed)
+        self.cart_items_layout = QVBoxLayout()
+        self.cart_items_layout.setAlignment(Qt.AlignTop)  # Align items to the top of the container
+
+        # Bottom layout (for total price and checkout button)
+        self.bottom_layout = QHBoxLayout()
+
+        # Add the bottom layout (checkout + total price) at the bottom
+        self.total_label = QLabel("Total: $0.00")
+        self.total_label.setStyleSheet("font-size: 20px; font-weight: bold;")
+
+        checkout_button = QPushButton("Checkout")
+        checkout_button.setStyleSheet("background-color: green; color: white; font-size: 16px; padding: 10px;")
+        checkout_button.clicked.connect(self.checkout)
+
+        self.bottom_layout.addWidget(checkout_button)
+        self.bottom_layout.addWidget(self.total_label, alignment=Qt.AlignRight)
+
+        # Add cart items layout and bottom layout to the main layout
+        self.layout.addLayout(self.cart_items_layout)
+        self.layout.addLayout(self.bottom_layout)
+
+        # Fetch and display cart items initially
         self.fetch_cart_items()
 
-    def fetch_cart_items(self):
-        # Send a "view_cart" command to the server to fetch the user's cart items
-        data = {"username": self.username}  # Assuming `self.username` holds the logged-in user's username
-        response = send_command("view_cart", data)
+    def go_back(self):
+        """Go back to the previous page."""
+        self.main_window.set_page(ProductListPage(self.main_window, self.username))
 
-        if response["error"] is False:
-            self.display_cart(response["content"])
-        else:
-            # Handle the case where the cart is empty or an error occurred
-            QMessageBox.warning(self, "Error", "Could not fetch cart items.")
+    def fetch_cart_items(self):
+        """Fetch the cart items from the server and display them."""
+        print(f"Fetching cart items for user {self.username}...")  # Debugging statement
+        response = send_command("view_cart", {"username": self.username})
+        if response["error"]:
+            QMessageBox.warning(self, "Error", "Failed to fetch cart items.")
+            return
+
+        # Call the method to update the cart display
+        self.display_cart(response["content"])
 
     def display_cart(self, cart_items):
+        """Display all cart items in the cart_items_layout."""
+        # Clear the current layout
+        for i in reversed(range(self.cart_items_layout.count())):
+            widget = self.cart_items_layout.itemAt(i).widget()
+            if widget:
+                widget.deleteLater()
+
         total_price = 0
+
         for item in cart_items:
             product_id = item["product_id"]
             name = item["name"]
             price = item["price"]
             quantity = item["quantity"]
 
-            # Create a horizontal layout for each item
-            item_layout = QHBoxLayout()
+            # Create a box (QFrame) to contain the product info
+            product_frame = QFrame()
+            product_frame.setStyleSheet("border: 1px solid #ccc; border-radius: 10px; padding: 10px; margin-bottom: 10px;")
 
-            # Display product name, quantity, and price
+            # Create a horizontal layout for the product frame
+            product_layout = QHBoxLayout()
+
+            # Display product information (name, quantity, price) in a bigger font
             product_label = QLabel(f"{name} x {quantity} - ${price * quantity:.2f}")
-            remove_button = QPushButton("X")
-            remove_button.clicked.connect(lambda _, product_id=product_id: self.remove_from_cart(product_id))
+            product_label.setStyleSheet("font-size: 18px; font-weight: bold;")  # Larger font size
 
-            item_layout.addWidget(product_label)
-            item_layout.addWidget(remove_button)
+            # Remove button with "Remove" text and updated size
+            remove_button = QPushButton("Remove")
+            remove_button.setFixedSize(120, 35)  # Slightly larger size
+            remove_button.setStyleSheet("""
+                background-color: green; 
+                color: white; 
+                border-radius: 15px; 
+                font-size: 16px; 
+                padding: 5px 10px;
+            """)
+            remove_button.clicked.connect(lambda _, pid=product_id: self.remove_from_cart(pid))
 
-            self.layout.addLayout(item_layout)
+            # Add the product label and remove button to the product layout
+            product_layout.addWidget(product_label)
+            product_layout.addStretch()  # Push the remove button to the right
+            product_layout.addWidget(remove_button)
 
+            # Set the layout for the product frame
+            product_frame.setLayout(product_layout)
+
+            # Add the product frame to the cart items layout
+            self.cart_items_layout.addWidget(product_frame)
+
+            # Update total price
             total_price += price * quantity
 
-        # Add total price at the bottom
-        total_label = QLabel(f"Total: ${total_price:.2f}")
-        self.layout.addWidget(total_label)
-
-        # Add checkout button
-        checkout_button = QPushButton("Checkout")
-        checkout_button.clicked.connect(self.checkout)
-        self.layout.addWidget(checkout_button)
+        # Update the total label
+        self.total_label.setText(f"Total: ${total_price:.2f}")
 
     def remove_from_cart(self, product_id):
-        # Send a "remove_from_cart" command to the server to remove the item
-        data = {"username": self.username, "product_id": product_id}
-        response = send_command("remove_from_cart", data)
-
-        if response["error"] is False:
-            # Refresh the cart after removing the item
-            self.fetch_cart_items()
+        """Remove an item from the cart."""
+        print(f"Removing product {product_id} from cart...")  # Debugging statement
+        response = send_command("remove_from_cart", {"username": self.username, "product_id": product_id})
+        
+        if response["error"]:
+            QMessageBox.warning(self, "Error", "Failed to remove item from cart.")
+            print("Error removing item:", response["content"])  # Debugging the error
+            return
+        
+        print("Item removed successfully. Fetching updated cart...")  # Debugging statement
+        self.fetch_cart_items()  # Refresh the cart after removal
 
     def checkout(self):
-        # Send a "checkout" command to the server
-        data = {"username": self.username}
-        response = send_command("checkout", data)
+        """Clear the cart and display a success message."""
+        response = send_command("checkout", {"username": self.username})
+        if response["error"]:
+            QMessageBox.warning(self, "Error", "Failed to complete checkout.")
+            return
 
-        if response["error"] is False:
-            QMessageBox.information(self, "Checkout", "Your order has been placed successfully!")
-            self.close()  # Close the cart page
-        else:
-            QMessageBox.warning(self, "Error", "There was an issue with your checkout.")
+        QMessageBox.information(self, "Success", "Checkout successful!")
+        # Refresh the cart after checkout
+        self.fetch_cart_items()
 
 
 class ChatPanel(QWidget):
@@ -1215,7 +1285,6 @@ class ChatPanel(QWidget):
     
         # Clear the message input area after sending
         self.message_input.clear()
-
 
 
 class MainWindow(QMainWindow):
