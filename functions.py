@@ -7,7 +7,7 @@ online_users = {}
 
 def client_handler(client_socket):
     username = None
-    print("in client handler")
+    
     while True:
         try:
             # Receive and decode the client's message
@@ -28,10 +28,7 @@ def client_handler(client_socket):
                 response = login_user(data)
                 if response["content"] == "Login successful":
                     username = data["username"]
-                    online_users[username] = client_socket 
-                    #pending_msgs = get_pending_messages(username)
-                    #if len(pending_msgs)!=0:
-                        #response += "\n\nYou have pending messages:\n" + "\n".join(pending_msgs)
+                    online_users[username] = data["p2p_address"]
             elif data["command"] == "rate":
                 response = rate_product(data)
             elif data["command"] == "add_to_cart":
@@ -45,8 +42,6 @@ def client_handler(client_socket):
                 response = checkout(data)
             elif data["command"] == "add_product":
                 response = add_product(data)
-            #elif data["command"] == "view_buyers":
-                #response = view_buyers(username)
             elif data["command"] == "view_products":
                 response = fetch_products()
             elif data["command"] == "view_products_by_owner":
@@ -60,15 +55,15 @@ def client_handler(client_socket):
             elif data["command"] == "store_message":
                 response = store_message(data)
             elif data["command"] == "quit":
-                online_users[username]=None
+                del online_users[username]
                 break
             else:
                 response= {"error": True, "message": "Unknown command"}
 
             # Send the response back to the client
-            print("about to send the add_to_cart response")
+            
             client_socket.send(json.dumps(response).encode('utf-8'))
-            print("sent")
+            
  
         except ConnectionResetError:
             print("Client disconnected")
@@ -420,7 +415,8 @@ def check_online_status(data):
     """
     username = data["username"]
     if username in online_users:
-        ip_address, port = online_users[username].getpeername()  # Retrieve IP and port
+        print(online_users[username])
+        ip_address, port = online_users[username]  # Retrieve IP and port of peer to peer connection
         return {"type": 0, "error": False, "content": {"is_online": True, "ip_address": ip_address, "port": port}}
     else:
         return {"type": 0, "error": False, "content": {"is_online": False}}
@@ -433,7 +429,6 @@ def store_message(data):
     sender = data["sender"]
     receiver = data["receiver"]
     message = data["message"]
-    sent = data["sent"]
     timestamp = data["time"]
 
     try:
@@ -442,10 +437,10 @@ def store_message(data):
 
         # Insert message into the messages table
         query = """
-        INSERT INTO messages (sender, receiver, message, sent, time)
+        INSERT INTO messages (sender, receiver, message, time)
         VALUES (?, ?, ?, ?, ?)
         """
-        cursor.execute(query, (sender, receiver, message, sent, timestamp))
+        cursor.execute(query, (sender, receiver, message, timestamp))
         conn.commit()
         conn.close()
 
@@ -463,7 +458,7 @@ def fetch_chats_between_users(user1, user2):
     
     # Query to fetch messages exchanged between two users
     query = """
-    SELECT sender, receiver, message, sent, time
+    SELECT sender, receiver, message, time
     FROM messages
     WHERE (sender = ? AND receiver = ?) OR (sender = ? AND receiver = ?)
     ORDER BY time ASC;
@@ -474,12 +469,11 @@ def fetch_chats_between_users(user1, user2):
     # Prepare the response
     response = []
     for row in results:
-        sender, receiver, message, sent, time = row
+        sender, receiver, message, time = row
         response.append({
             "sender": sender,
             "receiver": receiver,
             "message": message,
-            "sent": bool(sent),
             "time": time
         })
     

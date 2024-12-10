@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
     QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
 )
-from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint
+from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint, QMetaObject, pyqtSignal, pyqtSlot, Q_ARG
 from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon, QPixmap
 import sqlite3
 import math
@@ -13,6 +13,7 @@ import json
 import threading
 import time
 import requests
+from datetime import datetime
 
 # Function to send a command to the server
 def send_command(command, data=None):
@@ -34,24 +35,82 @@ def listen_for_responses():
             data = json.loads(response)
             if data["type"]==0: #Command Reply
                 responses.append(data)
-            elif data["type"]==1: #Message
-                messages.append(data)
-            elif data["type"]==2: #Notification
+            elif data["type"]==1: #Notification
                 notifs.append(data)
         except BlockingIOError:
             time.sleep(0.1)  
         except:
             print("Connection to the server was lost.")
             break
+        
+def handle_peer_connection(conn, addr):
+    """
+    Handle a single peer connection and directly update the chat UI.
+    """
+    try:
+        # Receive the message
+        peer_message = conn.recv(1024).decode('utf-8')
+        data = json.loads(peer_message)
+        
+        # Extract message details
+        sender = data["sender"]
+        message = data["message"]
+        timestamp = data["time"]
+        
+        # Immediately update the chat UI
+        print(f"Received message from {sender}: {message}")
+        
+        app = QApplication.instance()
+        for window in app.topLevelWidgets():
+            if isinstance(window, MainWindow):
+                
+                current_page = window.container_layout.itemAt(0).widget()
+                if isinstance(current_page, ProductListPage):
+                    
+                    current_page.chat_panel.incoming_message(sender, message, timestamp,is_user=False)
+                    break
+                
+    except Exception as e:
+        print(f"Error handling peer connection from {addr}: {e}")
+    finally:
+        conn.close()  # Close the connection
+
+def listen_for_peers():
+    """
+    Listen for incoming peer-to-peer connections and handle them immediately.
+    """
+    while True:
+        try:
+            conn, addr = peer_socket.accept()  # Accept an incoming connection
+            print(f"New peer connection from {addr}")
+            # Handle each peer connection in a new thread
+            threading.Thread(target=handle_peer_connection, args=(conn, addr), daemon=True).start()
+        except Exception as e:
+            print(f"Error in peer listener: {e}")
+            break
+
+
+
 
 client = socket(AF_INET, SOCK_STREAM)
 client.connect(('localhost', 8888))
+
+peer_socket = socket(AF_INET, SOCK_STREAM)
+peer_socket.bind(('localhost', 0))  # Bind to any available port
+peer_socket.listen(5)
+print("listenign on ", peer_socket.getsockname())
+# Get the assigned port
+peer_port = peer_socket.getsockname()[1]
+
 
 responses=[]
 messages=[]
 notifs=[]
 listener_thread = threading.Thread(target=listen_for_responses, daemon=True)
 listener_thread.start()
+
+peer_listener_thread = threading.Thread(target=listen_for_peers, daemon=True)
+peer_listener_thread.start()
 
 style = """
     QWidget {
@@ -217,8 +276,6 @@ class RegistrationPage(QWidget):
     def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
 
-    def go_back(self):
-        self.main_window.set_page(EntryPage(self.main_window))
 
 class LoginPage(QWidget):
     def __init__(self, main_window, parent=None):
@@ -256,7 +313,8 @@ class LoginPage(QWidget):
         
         login_data = {
             "username": username,
-            "password": password
+            "password": password,
+            "p2p_address": peer_socket.getsockname()
         }
         
         if username and password:
@@ -266,8 +324,8 @@ class LoginPage(QWidget):
                 self.parent().username = username  # Store logged-in username
                 self.main_window.set_page(ProductListPage(self.main_window, username))
                 screen = QApplication.desktop().screenGeometry()
-                self.main_window.resize(screen.width(), screen.height() - 40)
-                self.main_window.move(0, 0)  # Move closer to the top
+                self.main_window.resize(screen.width(), screen.height() - 50)
+                self.main_window.move(0, 0) 
             else:
                 QMessageBox.warning(self, "Error", response["content"])
         else:
@@ -1126,9 +1184,11 @@ class CartPage(QWidget):
 
 class ChatPanel(QWidget):
     """Sliding chat panel with recent chats and full chat functionality."""
+    new_message_signal = pyqtSignal(str, str, str, bool)
     def __init__(self, current_user, parent=None):
         super().__init__(parent)
         self.current_user = current_user
+        self.new_message_signal.connect(self.handle_incoming_message)
         self.setStyleSheet("""
             QWidget {
                 background-color: #f1f1f1;
@@ -1299,9 +1359,10 @@ class ChatPanel(QWidget):
             for msg in chat_data:
                 sender = msg["sender"]
                 message = msg["message"]
+                timestamp=msg["time"]
                 is_sent_by_current_user = (sender == current_user)
                 
-                self.add_chat_bubble(sender, message, is_sent_by_current_user)
+                self.add_chat_bubble(sender, message, is_sent_by_current_user,timestamp)
         else:
             QMessageBox.warning(self, "Error", "Failed to load chat messages.")
     
@@ -1336,27 +1397,27 @@ class ChatPanel(QWidget):
 
         self.parent().update_chat_button_position()
         
-    def listen_for_new_messages(self):
-        """Continuously check for new messages and update the chat."""
-        while True:
-            if messages:
-                new_message = messages.pop(0)
-                sender = new_message["sender"]
-                recipient = new_message["recipient"]
-                content = new_message["message"]
-                if recipient == self.current_user:  # Message meant for this user
-                    self.add_chat_bubble(sender, content, is_user=False)
-            time.sleep(0.1)
-            
-    def add_chat_bubble(self, sender, message, is_user):
-        """Add a chat bubble to the chat history."""
-        bubble_layout = QHBoxLayout()
+
+    def add_chat_bubble(self, sender, message, is_user, timestamp):
+        """Add a chat bubble to the chat history with a timestamp."""
+        # Main layout for the bubble
+        bubble_layout = QVBoxLayout()  # Vertical layout for the message and time
+        message_layout = QHBoxLayout()  # Horizontal layout for alignment of message
+        
+        # Create the message label
         bubble_label = QLabel(message)
         bubble_label.setWordWrap(True)
         bubble_label.setFont(QFont("Arial", 12))
         bubble_label.setContentsMargins(10, 10, 10, 10)
         bubble_label.setFixedWidth(300)
-
+    
+        # Create the timestamp label
+        time_label = QLabel(timestamp)
+        time_label.setFont(QFont("Arial", 8))
+        time_label.setStyleSheet("color: gray;")
+        time_label.setAlignment(Qt.AlignRight)
+        
+        # Style the bubble based on the sender
         if is_user:
             bubble_label.setStyleSheet("""
                 QLabel {
@@ -1365,8 +1426,8 @@ class ChatPanel(QWidget):
                     padding: 10px;
                 }
             """)
-            bubble_layout.addStretch()
-            bubble_layout.addWidget(bubble_label)
+            message_layout.addStretch()
+            message_layout.addWidget(bubble_label)
         else:
             bubble_label.setStyleSheet("""
                 QLabel {
@@ -1376,11 +1437,23 @@ class ChatPanel(QWidget):
                     border: 1px solid #ccc;
                 }
             """)
-            bubble_layout.addWidget(bubble_label)
-            bubble_layout.addStretch()
-
+            message_layout.addWidget(bubble_label)
+            message_layout.addStretch()
+        
+        # Add message and timestamp to the bubble layout
+        bubble_layout.addLayout(message_layout)
+        bubble_layout.addWidget(time_label)
+    
+        # Add the bubble to the chat content layout
         self.chat_content_layout.addLayout(bubble_layout)
+        self.chat_content.update()
+        self.chat_history.setWidget(self.chat_content)  # Ensure the widget is refreshed
+        self.chat_history.verticalScrollBar().setValue(
+            self.chat_history.verticalScrollBar().maximum()
+        )
 
+
+        
     def filter_chats(self):
         """Filter the recent chats based on the search text."""
         search_text = self.search_bar.text().lower()
@@ -1406,10 +1479,33 @@ class ChatPanel(QWidget):
         # Ensure the chat toggle button is updated
         self.parent().update_chat_button_position()
 
+    
+    def incoming_message(self, sender, message, timestamp, is_user=False):
+        """Handle an incoming message. Update the chat if the chat area is active."""
+        def update_ui():
+            if self.chat_area_widget and self.chat_owner_label.text().endswith(sender):
+                print(f"Adding message to chat from {sender}: {message}")
+                self.add_chat_bubble(sender, message, is_user, timestamp)
+            else:
+                QMessageBox.information(self, "New Message", f"New message from {sender}: {message}")
+        
+        # Ensure this runs on the main thread
+        QMetaObject.invokeMethod(self, "handle_incoming_message", Qt.QueuedConnection, Q_ARG(str, sender), Q_ARG(str, message), Q_ARG(str, timestamp), Q_ARG(bool, is_user))
 
+    
+    @pyqtSlot(str, str, str, bool)
+    def handle_incoming_message(self, sender, message, timestamp, is_user):
+        if self.chat_area_widget and self.chat_owner_label.text().endswith(sender):
+            print(f"Adding message to chat from {sender}: {message}")
+            self.add_chat_bubble(sender, message, is_user, timestamp)
+        else:
+            QMessageBox.information(self, "New Message", f"New message from {sender}: {message}")
+
+            
     def send_message(self, sender, recipient):
         """Send a message to the recipient using their IP address and port."""
         message_text = self.message_input.text()
+        timestamp=datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")
         if not message_text:
             QMessageBox.warning(self, "Error", "Message cannot be empty.")
             return
@@ -1424,17 +1520,17 @@ class ChatPanel(QWidget):
                 try:
                     # Establish a temporary socket connection to send the message
                     with socket(AF_INET, SOCK_STREAM) as temp_socket:
+                        print("Sending to",ip_address,port)
                         temp_socket.connect((ip_address, port))
                         print("Connected")
                         message_data = {
                             "sender": sender,
-                            "recipient": recipient,
-                            "sent":True,
+                            "receiver": recipient,
                             "message": message_text,
-                            "time": time.time(),
+                            "time": timestamp,
                         }
                         temp_socket.send(json.dumps(message_data).encode('utf-8'))
-                        self.add_chat_bubble(sender, message_text, True)
+                        self.add_chat_bubble(sender, message_text, True, timestamp)
                         send_command("store_message", message_data)
                 except Exception as e:
                     QMessageBox.critical(self, "Error", f"Failed to send message: {str(e)}")
@@ -1444,10 +1540,9 @@ class ChatPanel(QWidget):
                     "sender": sender,
                     "receiver": recipient,
                     "message": message_text,
-                    "sent": False,
-                    "time": time.time(),
+                    "time": timestamp,
                 }
-                self.add_chat_bubble(sender, message_text, True)
+                self.add_chat_bubble(sender, message_text, True,timestamp)
                 send_command("store_message", message_data)
         else:
             QMessageBox.critical(self, "Error", "Failed to check online status.")
