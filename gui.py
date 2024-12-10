@@ -2,7 +2,7 @@ from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPush
     QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint
-from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon
+from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon, QPixmap
 import sqlite3
 import math
 import sys  
@@ -98,18 +98,57 @@ class EntryPage(QWidget):
         layout = QVBoxLayout()
 
         header = QLabel("AUBoutique")
-        header.setStyleSheet("font-size: 24px; font-weight: bold; text-align: center;")
+        header.setStyleSheet("font-size: 150px; font-weight: bold; text-align: center; background: transparent;")
         header.setAlignment(Qt.AlignCenter)  # Center the label text
         layout.addWidget(header)
+        
+        # Adjust layout margins and spacing
+        layout.setContentsMargins(100, 100, 100, 50)
+        layout.setSpacing(10)
 
+        # Login Button
         login_button = QPushButton("Login")
+        login_button.setStyleSheet("font-size: 50px; padding: 15px;")
+        login_button.setFixedSize(300, 200)
+        login_button.clicked.connect(self.go_to_login)
+        
+        # Register Button
         register_button = QPushButton("Register")
+        register_button.setStyleSheet("font-size: 50px; padding: 15px;")
+        register_button.setFixedSize(300, 200)
+        register_button.clicked.connect(self.go_to_register)
+        
+        # Quit Button
+        quit_button = QPushButton("Quit")
+        quit_button.setStyleSheet("font-size: 50px; background-color: red; color: white; padding: 15px;")
+        quit_button.setFixedSize(300, 200)
+        quit_button.clicked.connect(self.close)
+        
         login_button.clicked.connect(self.go_to_login)
         register_button.clicked.connect(self.go_to_register)
-
-        layout.addWidget(login_button)
-        layout.addWidget(register_button)
+        quit_button.clicked.connect(self.close)
+        
+        buttons_layout = QHBoxLayout()
+        buttons_layout.addWidget(login_button, alignment=Qt.AlignCenter)
+        buttons_layout.addWidget(register_button, alignment=Qt.AlignCenter)
+        buttons_layout.addWidget(quit_button, alignment=Qt.AlignCenter)
+        
+        self.background_label = QLabel(self)
+        self.background_label.setPixmap(QPixmap('test.jpg'))
+        self.background_label.setScaledContents(True)
+        self.background_label.lower()
+        '''
+        layout.addWidget(login_button, alignment=Qt.AlignCenter)
+        layout.addWidget(register_button, alignment=Qt.AlignCenter)
+        layout.addWidget(quit_button, alignment=Qt.AlignCenter)'''
+        layout.addLayout(buttons_layout)
         self.setLayout(layout)
+        
+    def resizeEvent(self, event):
+        """Ensure the background image scales with the window."""
+        super().resizeEvent(event)  # Ensures default resize behavior is maintained
+        self.background_label.resize(self.size())  # Resize the background to match the window size
+
 
     def go_to_login(self):
         self.main_window.set_page(LoginPage(self.main_window))  # Use self.main_window to call set_page
@@ -702,7 +741,7 @@ class ProductListPage(QWidget):
         menu = QMenu()
         menu.addAction("My Products").triggered.connect(lambda: self.main_window.set_page(MyProductsPage(self.main_window, self.username)))
         menu.addAction("Add Product").triggered.connect(lambda: self.main_window.set_page(AddProductPage(self.main_window, self.username)))
-        menu.addAction("Log out")
+        menu.addAction("Log out").triggered.connect(self.logout)
         self.username_button.setMenu(menu)
         header_layout.addWidget(self.username_button, stretch=0)  # No stretch for the username button
 
@@ -864,7 +903,18 @@ class ProductListPage(QWidget):
         for i in range(self.content_layout.count()):
             widget = self.content_layout.itemAt(i).widget()
             if isinstance(widget, ProductWidget):
-                widget.setVisible(text.lower() in widget.name.lower())
+                # Check if the search query matches the product name or owner name
+                widget.setVisible(
+                    text.lower() in widget.name.lower() or text.lower() in widget.owner.lower()
+                )
+                
+    def logout(self):
+        """Handle user logout and redirect to the login page."""
+        confirm = QMessageBox.question(self, "Log Out", "Are you sure you want to log out?",QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+        if confirm == QMessageBox.Yes:
+            self.main_window.set_page(MainWindow())
+
+
 
 class CartPage(QWidget):
     def __init__(self, main_window, username):
@@ -1410,13 +1460,14 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("AUBoutique")
-        self.setGeometry(300, 100, 400, 300)
         self.setStyleSheet(style)
         self.container = QWidget()
         self.setCentralWidget(self.container)
         self.container_layout = QVBoxLayout() 
         self.container.setLayout(self.container_layout)
         self.set_page(EntryPage(self))  
+        self.showMaximized()
+        
 
     def set_page(self, page):
         if self.container_layout.count() > 0:
