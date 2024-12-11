@@ -1,12 +1,11 @@
-from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,
+
+from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,QWidgetAction,
     QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint, QMetaObject, pyqtSignal, pyqtSlot, Q_ARG
-from PyQt5.QtGui import QIcon, QFont, QPainter, QBrush, QColor, QPolygon, QPixmap
-import sqlite3
+from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPolygon, QPixmap
 import math
 import sys  
-import sqlite3
 from functions import *
 from socket import *
 import json
@@ -780,6 +779,7 @@ class ProductListPage(QWidget):
         super().__init__()
         self.username = username  # Store the logged-in username
         self.main_window=main_window
+        self.notifs = notifs
         self.current_currency = "USD"  # Default currency
         self.exchange_rates = self.fetch_exchange_rates()
         self.currency_symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
@@ -802,6 +802,41 @@ class ProductListPage(QWidget):
         menu.addAction("Log out").triggered.connect(self.logout)
         self.username_button.setMenu(menu)
         header_layout.addWidget(self.username_button, stretch=0)  # No stretch for the username button
+        
+        # Notification Bell Button
+        self.notification_bell_button = QPushButton("🔔")
+        self.notification_bell_button.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+            }
+            QPushButton:focus {
+                outline: none;
+            }
+        """)
+        self.notification_bell_button.clicked.connect(self.show_notifications_dropdown)
+        header_layout.addWidget(self.notification_bell_button)  
+
+
+        # Add the green dot for unread notifications
+        self.notification_indicator = QLabel()
+        self.notification_indicator.setStyleSheet("""
+            QLabel {
+                background-color: green;
+                color: white;
+                border-radius: 5px;
+                font-size: 10px;
+                min-width: 10px;
+                min-height: 10px;
+                padding: 2px;
+                text-align: center;
+            }
+        """)
+        self.notification_indicator.setVisible(False)  # Initially hidden
+
+        # Add both to the header layout
+        header_layout.addWidget(self.notification_bell_button)
+        header_layout.addWidget(self.notification_indicator)
 
         # Search bar
         self.search_bar = QLineEdit()
@@ -810,7 +845,7 @@ class ProductListPage(QWidget):
         header_layout.addWidget(self.search_bar, stretch=5)  # Stretch factor for a wider search bar
 
         # Cart button 
-        cart_button = QPushButton("🛒")  # Use the shopping cart emoji as the button label
+        cart_button = QPushButton("🛒")  
         cart_button.setFixedSize(40, 40)  # Adjust the size for better appearance
         cart_button.setStyleSheet("""
             QPushButton {
@@ -909,6 +944,99 @@ class ProductListPage(QWidget):
 
         # Update the button position
         self.update_chat_button_position()
+    
+    def fetch_notifications(self):
+        """Fetch notifications from the server."""
+        response = send_command("fetch_notifications", {"username": self.username})
+        if not response["error"]:
+            self.notifs = response["content"]  # Save notifications locally
+            self.update_notification_indicator()
+        else:
+            QMessageBox.warning(self, "Error", "Failed to fetch notifications.")
+
+        
+    def show_notifications_dropdown(self):
+        """Display notifications in a dropdown."""
+        self.notifications_menu = QMenu(self)
+        self.notifications_menu.setStyleSheet("""
+            QMenu {
+                background-color: #f9f9f9;
+                border: 1px solid #ccc;
+                max-height: 300px; /* Scrollable */
+            }
+        """)
+
+        for notif in self.notifs:
+            notif_widget = QWidget()
+            layout = QHBoxLayout(notif_widget)
+
+            # Notification Text
+            notif_label = QLabel(f"{notif['owner']} added: {notif['product_name']}")
+            layout.addWidget(notif_label)
+
+            # Mark as Read Button
+            if not notif["is_read"]:
+                mark_as_read_button = QPushButton("Mark as Read")
+                mark_as_read_button.clicked.connect(lambda _, n=notif: self.mark_notification_as_read(n))
+                layout.addWidget(mark_as_read_button)
+
+            # Remove Button
+            remove_button = QPushButton("X")
+            remove_button.clicked.connect(lambda _, n=notif: self.remove_notification(n))
+            layout.addWidget(remove_button)
+
+            notif_widget.setLayout(layout)
+            action = QWidgetAction(self.notifications_menu)
+            action.setDefaultWidget(notif_widget)
+            self.notifications_menu.addAction(action)
+
+        self.notifications_menu.exec_(self.notification_bell_button.mapToGlobal(QPoint(0, self.notification_bell_button.height())))
+
+    def remove_notification(self, notif):
+        response = send_command("remove_notification", {"username": self.username, "notification_id": notif["id"]})
+        if not response["error"]:
+            self.notifs.remove(notif)
+            self.update_notification_indicator()
+            self.show_notifications_dropdown()
+
+
+    def update_notification_indicator(self):
+        """Update the green dot on the notification bell."""
+        unread_count = sum(1 for notif in self.notifs if not notif["is_read"])
+        if unread_count > 0:
+            # Add green dot
+            self.notification_bell_button.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                }
+                QPushButton::after {
+                    content: '';
+                    position: absolute;
+                    width: 10px;
+                    height: 10px;
+                    background-color: green;
+                    border-radius: 5px;
+                    top: 0;
+                    right: 0;
+                }
+            """)
+        else:
+            # Remove green dot
+            self.notification_bell_button.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                }
+            """)
+
+    def mark_notification_as_read(self, notif):
+        response = send_command("mark_notification_as_read", {"username": self.username, "notification_id": notif["id"]})
+        if not response["error"]:
+            notif["is_read"] = True
+            self.update_notification_indicator()
+            self.show_notifications_dropdown()
+
 
     def toggle_chat_panel(self):
         """Slide the chat panel in and out, keeping it proportional."""
@@ -1244,14 +1372,15 @@ class ChatPanel(QWidget):
         if not response["error"]:
             chats = response["content"]
             self.recent_chats_list.clear()
-    
+
             for chat in chats:
                 owner = chat["owner"]
-    
+                is_followed = chat.get("is_followed", False)
+
                 # Create a custom item for the chat
                 item_widget = QWidget()
                 item_layout = QVBoxLayout(item_widget)
-    
+
                 user_box = QFrame()
                 user_box.setStyleSheet("""
                     QFrame {
@@ -1261,14 +1390,14 @@ class ChatPanel(QWidget):
                         padding: 10px;
                     }
                 """)
-                user_box_layout = QHBoxLayout(user_box)  
-                
+                user_box_layout = QHBoxLayout(user_box)
+
                 # Owner name
                 owner_label = QLabel(owner)
                 owner_label.setStyleSheet("font-size: 16px; font-weight: bold;")
                 user_box_layout.addWidget(owner_label, alignment=Qt.AlignLeft)
-    
-                # Check Online Status Button (on the left)
+
+                # Check Online Status Button
                 check_button = QPushButton("Check if Online")
                 check_button.setStyleSheet("""
                     QPushButton {
@@ -1283,8 +1412,24 @@ class ChatPanel(QWidget):
                 """)
                 check_button.clicked.connect(lambda _, owner=owner: self.check_online_status(owner))
                 user_box_layout.addWidget(check_button, alignment=Qt.AlignLeft)
-    
-                # Chat Button (on the right)
+
+                # Follow/Unfollow Button
+                follow_button = QPushButton("Unfollow" if is_followed else "Follow")
+                follow_button.setStyleSheet("""
+                    QPushButton {
+                        background-color: #007BFF;
+                        color: white;
+                        border-radius: 5px;
+                        padding: 5px;
+                    }
+                    QPushButton:hover {
+                        background-color: #0056b3;
+                    }
+                """)
+                follow_button.clicked.connect(lambda _, owner=owner, btn=follow_button: self.toggle_follow(owner, btn))
+                user_box_layout.addWidget(follow_button, alignment=Qt.AlignLeft)
+
+                # Chat Button
                 chat_button = QPushButton("Chat")
                 chat_button.setStyleSheet("""
                     QPushButton {
@@ -1299,17 +1444,27 @@ class ChatPanel(QWidget):
                 """)
                 chat_button.clicked.connect(lambda _, owner=owner: self.load_chat(self.current_user, owner))
                 user_box_layout.addWidget(chat_button, alignment=Qt.AlignRight)
-    
+
                 # Finalize layout
                 item_layout.addWidget(user_box)
                 item_widget.setLayout(item_layout)
-    
+
                 list_item = QListWidgetItem()
                 list_item.setSizeHint(item_widget.sizeHint())
                 self.recent_chats_list.addItem(list_item)
                 self.recent_chats_list.setItemWidget(list_item, item_widget)
         else:
             QMessageBox.warning(self, "Error", "Failed to fetch recent chats.")
+
+    def toggle_follow(self, owner, button):
+        """Toggle follow/unfollow state for an owner."""
+        action = "follow" if button.text() == "Follow" else "unfollow"
+        response = send_command("toggle_follow", {"username": self.current_user, "owner": owner, "action": action})
+        if not response["error"]:
+            # Update button text based on the new state
+            button.setText("Unfollow" if action == "follow" else "Follow")
+        else:
+            QMessageBox.warning(self, "Error", "Failed to update follow state.")
 
 
     def check_online_status(self, user):
@@ -1582,3 +1737,4 @@ if __name__ == "__main__":
     window.show()
     sys.exit(app.exec_())
 
+ 
