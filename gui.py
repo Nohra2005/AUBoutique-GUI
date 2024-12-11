@@ -589,13 +589,15 @@ class AddProductPage(QWidget):
 
 class MyProductWidget(QFrame):
     """Widget to display a product owned by the user."""
-    def __init__(self, product_id, name, description, price, quantity, parent=None):
+    def __init__(self, product_id, name, description, price, quantity, main_window, username, parent=None):
         super().__init__(parent)
         self.product_id = product_id
         self.name = name
         self.description = description
         self.price = price
         self.quantity = quantity
+        self.main_window = main_window
+        self.username = username
 
         # Set QFrame styling to look like a box
         self.setFrameShape(QFrame.StyledPanel)
@@ -631,13 +633,116 @@ class MyProductWidget(QFrame):
         quantity_label = QLabel(f"Quantity: {self.quantity}")
         quantity_label.setStyleSheet("font-size: 14px; color: #333;")
 
-        # Add labels to the layout
+        # Modify Product button
+        modify_button = QPushButton("Modify Product")
+        modify_button.setStyleSheet("background-color: blue; color: white; font-size: 14px;")
+        modify_button.clicked.connect(self.modify_product)
+
+        # Add labels and button to the layout
         layout.addWidget(name_label)
         layout.addWidget(description_label)
         layout.addWidget(price_label)
         layout.addWidget(quantity_label)
+        layout.addWidget(modify_button)
 
         self.setLayout(layout)
+
+    def modify_product(self):
+        """Open the Modify Product page for this product."""
+        self.main_window.set_page(
+            ModifyProductPage(
+                self.main_window,
+                self.username,
+                self.product_id,
+                self.name,
+                self.description,
+                self.price,
+                self.quantity
+            )
+        )
+
+
+class ModifyProductPage(QWidget):
+    """Page to modify an existing product."""
+    def __init__(self, main_window, username, product_id, name, description, price, quantity):
+        super().__init__()
+        self.main_window = main_window
+        self.username = username
+        self.product_id = product_id
+
+        layout = QVBoxLayout()
+
+        header = QLabel("Modify Product")
+        header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
+        header.setAlignment(Qt.AlignCenter)
+        layout.addWidget(header)
+
+        # Input fields pre-filled with product data
+        self.name_input = QLineEdit(self)
+        self.name_input.setText(name)
+        self.description_input = QLineEdit(self)
+        self.description_input.setText(description)
+        self.price_input = QLineEdit(self)
+        self.price_input.setText(str(price))
+        self.quantity_input = QLineEdit(self)
+        self.quantity_input.setText(str(quantity))
+
+        layout.addWidget(QLabel("Name:"))
+        layout.addWidget(self.name_input)
+        layout.addWidget(QLabel("Description:"))
+        layout.addWidget(self.description_input)
+        layout.addWidget(QLabel("Price:"))
+        layout.addWidget(self.price_input)
+        layout.addWidget(QLabel("Quantity:"))
+        layout.addWidget(self.quantity_input)
+
+        # Submit button
+        submit_button = QPushButton("Save Changes")
+        submit_button.clicked.connect(self.modify_product)
+        layout.addWidget(submit_button)
+
+        back_button = QPushButton("Cancel")
+        back_button.clicked.connect(self.go_back)
+        layout.addWidget(back_button)
+
+        self.setLayout(layout)
+
+    def modify_product(self):
+        """Send the modified product details to the server."""
+        name = self.name_input.text()
+        description = self.description_input.text()
+        price = self.price_input.text()
+        quantity = self.quantity_input.text()
+
+        if not (name and description and price and quantity):
+            QMessageBox.warning(self, "Error", "All fields must be filled.")
+            return
+
+        try:
+            price = float(price)
+            quantity = int(quantity)
+        except ValueError:
+            QMessageBox.warning(self, "Error", "Invalid price or quantity format.")
+            return
+
+        data = {
+            "product_id": self.product_id,
+            "name": name,
+            "description": description,
+            "price": price,
+            "quantity": quantity
+        }
+        response = send_command("modify_product", data)
+
+        if response["error"]:
+            QMessageBox.warning(self, "Error", response["content"])
+        else:
+            QMessageBox.information(self, "Success", "Product modified successfully.")
+            self.main_window.set_page(MyProductsPage(self.main_window, self.username))
+
+    def go_back(self):
+        """Go back to the My Products page."""
+        self.main_window.set_page(MyProductsPage(self.main_window, self.username))
 
 
 class MyProductsPage(QWidget):
@@ -672,7 +777,7 @@ class MyProductsPage(QWidget):
                 for product in products:
                     product_id, name, description, price, quantity, owner_username = product
                     product_widget = MyProductWidget(
-                        product_id, name, description, price, quantity
+                        product_id, name, description, price, quantity, self.main_window, self.username
                     )
                     content_layout.addWidget(product_widget)
         except Exception as e:

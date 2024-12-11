@@ -56,6 +56,8 @@ def client_handler(client_socket):
                 response = store_message(data)
             elif data["command"] == "toggle_follow":
                 response = toggle_follow(data)
+            elif data["command"] == "modify_product":
+                response = modify_product(data)
             elif data["command"] == "quit":
                 del online_users[username]
                 break
@@ -73,6 +75,28 @@ def client_handler(client_socket):
             break
 
     client_socket.close()
+
+
+def modify_product(data):
+    """Modify an existing product in the database."""
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE products
+            SET name = ?, description = ?, price = ?, quantity = ?
+            WHERE product_id = ?
+        """, (data["name"], data["description"], data["price"], data["quantity"], data["product_id"]))
+
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "content": "Product modified successfully."}
+    except sqlite3.Error as e:
+        return {"type": 0, "error": True, "content": f"Database error: {str(e)}"}
+    except Exception as e:
+        return {"type": 0, "error": True, "content": f"Unexpected error: {str(e)}"}
 
 
 def view_products_by_owner(data):
