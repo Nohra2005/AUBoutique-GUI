@@ -475,7 +475,8 @@ def checkout(data):
         cursor.execute("INSERT OR REPLACE INTO carts (username, cart_list) VALUES (?, ?)", (username, json.dumps({})))
 
         conn.commit()
-        return {"type": 0, "error": False, "content": "Checkout successful. Cart is now empty."}
+        pickup_date = datetime.now() + timedelta(days=2)
+        return {"type": 0, "error": False, "content": "Checkout successful. You can pick up your product in "+ pickup_date+" days."}
     except sqlite3.Error as e:
         if conn:
             conn.rollback()
