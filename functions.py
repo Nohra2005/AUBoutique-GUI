@@ -54,6 +54,8 @@ def client_handler(client_socket):
                 response = fetch_chats_between_users(username,data["other"]) 
             elif data["command"] == "store_message":
                 response = store_message(data)
+            elif data["command"] == "toggle_follow":
+                response = toggle_follow(data)
             elif data["command"] == "quit":
                 del online_users[username]
                 break
@@ -105,12 +107,91 @@ def add_product(data):
             VALUES (?, ?, ?, ?, ?)
         """, (data["name"], data["description"], data["price"], data["quantity"], data["owner"]))
 
+        product_name = data.get("name")
+        owner = data.get("owner")
+
+          # Notify subscribed users
+        cursor.execute(
+            "SELECT user FROM subscribed_owners WHERE owner = ?", (owner,)
+        )
+        subscribers = cursor.fetchall()
+
+        for subscriber in subscribers:
+            cursor.execute(
+                "INSERT INTO notifications (username, product_name, owner, is_read) VALUES (?, ?, ?, 0)",
+                (subscriber[0], product_name, owner),
+            )
+
         conn.commit()
         conn.close()
 
         return {"type": 0, "error": False, "content": "Product added successfully."}
     except Exception as e:
         return {"type": 0, "error": True, "content": f"Failed to add product: {str(e)}"}
+
+def fetch_notifications(data):
+    """Fetch notifications for a user."""
+    username = data.get("username")
+
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "SELECT id, product_name, owner, is_read FROM notifications WHERE username = ?",
+            (username,),
+        )
+        notifications = [
+            {"id": row[0], "product_name": row[1], "owner": row[2], "is_read": row[3]}
+            for row in cursor.fetchall()
+        ]
+
+        conn.close()
+        return {"type": 0, "error": False, "content": notifications}
+    except Exception as e:
+        return {"type": 0, "error": True, "message": str(e)}
+
+def mark_notification_as_read(data):
+    """Mark a notification as read in the database."""
+    notification_id = data.get("notification_id")
+    username = data.get("username")
+
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "UPDATE notifications SET is_read = 1 WHERE id = ? AND username = ?",
+            (notification_id, username),
+        )
+
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "message": "Notification marked as read."}
+    except Exception as e:
+        return {"type": 0, "error": True, "message": str(e)}
+
+def remove_notification(data):
+    """Remove a notification from the database."""
+    notification_id = data.get("notification_id")
+    username = data.get("username")
+
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        cursor.execute(
+            "DELETE FROM notifications WHERE id = ? AND username = ?",
+            (notification_id, username),
+        )
+
+        conn.commit()
+        conn.close()
+
+        return {"type": 0, "error": False, "message": "Notification removed."}
+    except Exception as e:
+        return {"type": 0, "error": True, "message": str(e)}
 
 
 # Server functionalities
@@ -124,9 +205,9 @@ def register_user(data):
         """, (data["username"], data["password"], data["email"], data["name"]))
         conn.commit()
         conn.close()
-        return {"type":0,"error": False, "content": "User registered successfully. Please login."}
+        return {"type":0, "error": False, "content": "User registered successfully. Please login."}
     except sqlite3.IntegrityError:
-        return {"type":0,"error": True, "content": "Username already exists."}
+        return {"type":0, "error": True, "content": "Username already exists."}
 
 def login_user(data):
     conn = sqlite3.connect("auboutique.db")
@@ -479,6 +560,44 @@ def fetch_chats_between_users(user1, user2):
     
     return {"type":0,"error": False, "content": response}
 
+def toggle_follow(data):
+    """Handle follow/unfollow commands."""
+    username = data.get("username")
+    owner = data.get("owner")
+    action = data.get("action")
 
+    # Print the input data for debugging
+    print(f"DEBUG: Received request with username={username}, owner={owner}, action={action}")
 
+    if not username or not owner or action not in ["follow", "unfollow"]:
+        print("ERROR: Invalid request parameters.")
+        return {"type": 0, "error": True, "message": "Invalid request parameters."}
 
+    try:
+        # Connect to the database
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+        print("DEBUG: Connected to the database.")
+
+        # Perform the database operation
+        if action == "follow":
+            print(f"DEBUG: Executing FOLLOW query for username={username} and owner={owner}.")
+            cursor.execute("INSERT INTO subscribed_owners (user, owner) VALUES (?, ?)", (username, owner))
+        elif action == "unfollow":
+            print(f"DEBUG: Executing UNFOLLOW query for username={username} and owner={owner}.")
+            cursor.execute("DELETE FROM subscribed_owners WHERE user = ? AND owner = ?", (username, owner))
+
+        # Commit changes
+        conn.commit()
+        print("DEBUG: Database changes committed successfully.")
+
+        # Close the connection
+        conn.close()
+        print("DEBUG: Database connection closed.")
+
+        # Return success
+        return {"type": 0, "error": False, "message": f"Successfully {action}ed {owner}."}
+
+    except Exception as e:
+        print(f"ERROR: An exception occurred: {e}")
+        return {"type": 0, "error": True, "message": str(e)}
