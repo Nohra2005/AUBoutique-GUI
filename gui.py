@@ -1344,6 +1344,7 @@ class CartPage(QWidget):
     def go_back(self):
         """Go back to the previous page."""
         self.main_window.set_page(ProductListPage(self.main_window, self.username))
+        
 
     def fetch_cart_items(self):
         """Fetch the cart items from the server and display them."""
