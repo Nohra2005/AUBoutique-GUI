@@ -204,8 +204,13 @@ class EntryPage(QWidget):
         self.background_label.resize(self.size())  # Resize the background to match the window size
     
     def quit_page(self):
-        QApplication.instance().quit()
+        """Quit the entire application."""
+        for widget in QApplication.instance().allWidgets():
+            widget.close()  # Close all open widgets
         send_command("quit")
+        QApplication.instance().quit()  # Gracefully terminate the application
+        
+
 
     def go_to_login(self):
         self.main_window.set_page(LoginPage(self.main_window))  # Use self.main_window to call set_page

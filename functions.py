@@ -12,7 +12,7 @@ def client_handler(client_socket):
         try:
             # Receive and decode the client's message
             message = client_socket.recv(4096).decode('utf-8')
-            br=False
+            
             if not message:
                 break
 
@@ -64,18 +64,14 @@ def client_handler(client_socket):
                     del online_users[username]
                 response= {"type":0,"error": False, "content": "Log out sucessful."}
             elif data["command"] == "quit":
-                if username in online_users:
-                    del online_users[username]
                 print("Client disconnected")
-                br=True
                 response= {"type":0,"error": False, "content": "Quit sucessful."}
             else:
                 response= {"type":0,"error": True, "content": "Unknown command"}
 
             # Send the response back to the client
-            print(response,data)
             client_socket.send(json.dumps(response).encode('utf-8'))
-            if br: break
+            
  
         except ConnectionResetError:
             print("Client disconnected")
