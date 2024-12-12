@@ -22,9 +22,6 @@ AUBoutique is an online marketplace tailored for the AUB community, providing a 
 - **Offline Messaging**: Messages are queued and delivered once users are online.
 - **Custom GUI**: Built using PyQt for a rich user experience.
 
-### Optional Features
-- Extend peer-to-peer messaging to include media (e.g., images, videos).
-
 ---
 
 ## System Architecture
@@ -60,7 +57,6 @@ AUBoutique/
 ├── auboutique.db        # SQLite database
 ├── README.md            # Project documentation
 ├── test.jpg             # GUI assets
-├── Project Phase 2.pdf  # Assignment instructions
 ├── AUBoutique_Project_Report.pdf  # Project report with details on Phases I & II
 ```
 
