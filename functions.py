@@ -12,6 +12,7 @@ def client_handler(client_socket):
         try:
             # Receive and decode the client's message
             message = client_socket.recv(4096).decode('utf-8')
+            br=False
             if not message:
                 break
 
@@ -58,16 +59,23 @@ def client_handler(client_socket):
                 response = toggle_follow(data)
             elif data["command"] == "modify_product":
                 response = modify_product(username,data)
+            elif data["command"] == "log_out":
+                if username in online_users:
+                    del online_users[username]
+                response= {"type":0,"error": False, "content": "Log out sucessful."}
             elif data["command"] == "quit":
-                del online_users[username]
-                break
+                if username in online_users:
+                    del online_users[username]
+                print("Client disconnected")
+                br=True
+                response= {"type":0,"error": False, "content": "Quit sucessful."}
             else:
-                response= {"error": True, "message": "Unknown command"}
+                response= {"type":0,"error": True, "content": "Unknown command"}
 
             # Send the response back to the client
-            
+            print(response,data)
             client_socket.send(json.dumps(response).encode('utf-8'))
-            
+            if br: break
  
         except ConnectionResetError:
             print("Client disconnected")
@@ -222,15 +230,17 @@ def login_user(data):
         return {"type":0,"error": True, "content": "Invalid username or password"}
     
 def fetch_products():
-    """Fetch products from the SQLite database."""
+    """Fetch products from the SQLite database with non-zero quantity."""
     conn = sqlite3.connect("auboutique.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT product_id, name, description, price, owner_username, average_rating, quantity FROM products
+        SELECT product_id, name, description, price, owner_username, average_rating, quantity 
+        FROM products
+        WHERE quantity > 0
     """)
     products = cursor.fetchall()
     conn.close()
-    return {"type":0, "error":False, "content":products}
+    return {"type": 0, "error": False, "content": products}
 
 def rate_product(data):
     conn = sqlite3.connect("auboutique.db")

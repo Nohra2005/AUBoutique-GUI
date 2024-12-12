@@ -30,6 +30,7 @@ def listen_for_responses():
     while True:
         try:
             response = client.recv(4096).decode('utf-8')
+            if len(response)<=1: continue
             data = json.loads(response)
             if data["type"] == 0:  # Command Reply
                 responses.append(data)
@@ -180,11 +181,9 @@ class EntryPage(QWidget):
         quit_button = QPushButton("Quit")
         quit_button.setStyleSheet("font-size: 50px; background-color: red; color: white; padding: 15px;")
         quit_button.setFixedSize(300, 200)
-        quit_button.clicked.connect(self.close)
+        quit_button.clicked.connect(self.quit_page)
+
         
-        login_button.clicked.connect(self.go_to_login)
-        register_button.clicked.connect(self.go_to_register)
-        quit_button.clicked.connect(self.close)
         
         buttons_layout = QHBoxLayout()
         buttons_layout.addWidget(login_button, alignment=Qt.AlignCenter)
@@ -195,10 +194,7 @@ class EntryPage(QWidget):
         self.background_label.setPixmap(QPixmap('test.jpg'))
         self.background_label.setScaledContents(True)
         self.background_label.lower()
-        '''
-        layout.addWidget(login_button, alignment=Qt.AlignCenter)
-        layout.addWidget(register_button, alignment=Qt.AlignCenter)
-        layout.addWidget(quit_button, alignment=Qt.AlignCenter)'''
+        
         layout.addLayout(buttons_layout)
         self.setLayout(layout)
         
@@ -206,7 +202,10 @@ class EntryPage(QWidget):
         """Ensure the background image scales with the window."""
         super().resizeEvent(event)  # Ensures default resize behavior is maintained
         self.background_label.resize(self.size())  # Resize the background to match the window size
-
+    
+    def quit_page(self):
+        QApplication.instance().quit()
+        send_command("quit")
 
     def go_to_login(self):
         self.main_window.set_page(LoginPage(self.main_window))  # Use self.main_window to call set_page
@@ -269,8 +268,10 @@ class RegistrationPage(QWidget):
             if  not response["error"]:
                 QMessageBox.information(self, "Success", response["content"])
                 self.main_window.set_page(EntryPage(self.main_window))
+            else:
+                QMessageBox.critical(self, "Error",  "Username is already taken!")
         else:
-            QMessageBox.critical(self, "Error", response["content"])
+            QMessageBox.critical(self, "Error",  "Please fill in all fields.")
         
     def go_back(self):
         self.main_window.set_page(EntryPage(self.main_window))
@@ -1234,6 +1235,7 @@ class ProductListPage(QWidget):
                 
     def logout(self):
         """Handle user logout and redirect to the login page."""
+        send_command("log_out")
         confirm = QMessageBox.question(self, "Log Out", "Are you sure you want to log out?",QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
         if confirm == QMessageBox.Yes:
             self.main_window.set_page(MainWindow())
