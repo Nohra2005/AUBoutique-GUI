@@ -1020,7 +1020,7 @@ class ProductListPage(QWidget):
 
         # Search bar
         self.search_bar = QLineEdit()
-        self.search_bar.setPlaceholderText("Search for products...")
+        self.search_bar.setPlaceholderText("Search for products or owners...")
         self.search_bar.textChanged.connect(self.filter_products)  # Connect to filtering function
         header_layout.addWidget(self.search_bar, stretch=5)  # Stretch factor for a wider search bar
 
