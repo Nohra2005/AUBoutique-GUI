@@ -67,6 +67,7 @@ AUBoutique/
 ### Prerequisites
 - Python 3.8 or higher
 - Required libraries: `PyQt5`, `sqlite3`, `socket`, `json`, `requests`
+- Requests and wifi needed for the live currency exchange rates
 - Install dependencies using:
   ```bash
   pip install PyQt5 requests
@@ -89,8 +90,11 @@ AUBoutique/
 - **Users Table**: Stores user credentials and profiles.
 - **Products Table**: Tracks product details (name, description, price, owner).
 - **Cart Table**: Stores cart items for each user.
+- **Subscribed Owners Table**: Stores the usernames of all owners a user is following.
+- **Product Buyers Table**: Tracks which users bought which products.
 - **Messages Table**: Manages peer-to-peer communications.
-- **Ratings Table**: Records product ratings.
+- **Ratings Table**: Records product ratings and calculates averages.
+- **Carts Table**: Stores serialized cart information for each user.
 
 ---
 
@@ -108,12 +112,5 @@ AUBoutique/
 
 ---
 
-## Future Enhancements
-- Extending peer-to-peer messaging for multimedia.
-- Implementing additional notifications.
-
----
-
 ## References
-- `Project Phase 2.pdf`: Assignment details.
 - `AUBoutique_Project_Report.pdf`: Detailed project report.
