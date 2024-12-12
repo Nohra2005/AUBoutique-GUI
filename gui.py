@@ -1,5 +1,4 @@
-
-from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,QWidgetAction,
+from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,QWidgetAction,QDialog,
     QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
 )
 from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint, QMetaObject, pyqtSignal, pyqtSlot, Q_ARG
@@ -743,6 +742,92 @@ class ModifyProductPage(QWidget):
     def go_back(self):
         """Go back to the My Products page."""
         self.main_window.set_page(MyProductsPage(self.main_window, self.username))
+        
+        
+class MyProductWidget(QWidget):
+    def __init__(self, product_id, name, description, price, quantity, main_window, username):
+        super().__init__()
+        self.product_id = product_id
+        self.name = name
+        self.description = description
+        self.price = price
+        self.quantity = quantity
+        self.main_window = main_window
+        self.username = username
+
+        layout = QVBoxLayout()
+
+        # Product details
+        product_label = QLabel(f"{name} - ${price} ({quantity} left)")
+        product_label.setStyleSheet("font-weight: bold; font-size: 16px;")
+        layout.addWidget(product_label)
+
+        description_label = QLabel(f"Description: {description}")
+        description_label.setWordWrap(True)
+        layout.addWidget(description_label)
+
+        # View Buyers button (small size)
+        view_buyers_button = QPushButton("View Buyers")
+        view_buyers_button.setFixedSize(100, 30)  # Set fixed size for smaller button
+        view_buyers_button.setStyleSheet(
+            """
+            QPushButton {
+                font-size: 12px;
+                padding: 3px;
+                background-color: #4CAF50;  /* Green button */
+                color: white;
+                border: none;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+            QPushButton:pressed {
+                background-color: #388E3C;
+            }
+            """
+        )
+        view_buyers_button.clicked.connect(self.view_buyers)
+        layout.addWidget(view_buyers_button)
+
+        self.setLayout(layout)
+
+    def view_buyers(self):
+        """Fetch and display the list of buyers for this product."""
+        try:
+            data = {"product_id": self.product_id}
+            response = send_command("view_product_buyers", data)  # Server call
+
+            if response["error"]:
+                QMessageBox.warning(self, "Error", response["message"])
+            else:
+                buyers = response["content"]
+                self.display_buyers(buyers)
+        except Exception as e:
+            QMessageBox.critical(self, "Error", f"Failed to fetch buyers: {str(e)}")
+
+    def display_buyers(self, buyers):
+        """Show buyers in a new popup dialog."""
+        buyers_window = QDialog(self.main_window)
+        buyers_window.setWindowTitle("Product Buyers")
+
+        layout = QVBoxLayout(buyers_window)
+
+        # List all buyers
+        if buyers:
+            for buyer in buyers:
+                buyer_label = QLabel(f"Buyer: {buyer['buyer_username']}")
+                layout.addWidget(buyer_label)
+        else:
+            layout.addWidget(QLabel("No buyers found for this product."))
+
+        # Close button
+        close_button = QPushButton("Close")
+        close_button.clicked.connect(buyers_window.close)
+        layout.addWidget(close_button)
+
+        buyers_window.setLayout(layout)
+        buyers_window.exec_()
 
 
 class MyProductsPage(QWidget):
@@ -753,6 +838,7 @@ class MyProductsPage(QWidget):
 
         layout = QVBoxLayout()
 
+        # Header
         header = QLabel("My Products")
         header.setStyleSheet("font-size: 20px; font-weight: bold; text-align: center;")
         header.setAlignment(Qt.AlignCenter)
@@ -774,14 +860,24 @@ class MyProductsPage(QWidget):
                 QMessageBox.warning(self, "Error", response["content"])
             else:
                 products = response["content"]
-                for product in products:
-                    product_id, name, description, price, quantity, owner_username = product
-                    product_widget = MyProductWidget(
-                        product_id, name, description, price, quantity, self.main_window, self.username
-                    )
-                    content_layout.addWidget(product_widget)
+                if products:
+                    for product in products:
+                        # Adjust the unpacking to match the server's response
+                        product_id, name, description, price, quantity, *_ = product
+
+                        # Add each product as a MyProductWidget
+                        product_widget = MyProductWidget(
+                            product_id, name, description, price, quantity, self.main_window, self.username
+                        )
+                        content_layout.addWidget(product_widget)
+                else:
+                    no_products_label = QLabel("You have no products.")
+                    no_products_label.setStyleSheet("font-size: 16px; text-align: center;")
+                    no_products_label.setAlignment(Qt.AlignCenter)
+                    content_layout.addWidget(no_products_label)
         except Exception as e:
             QMessageBox.critical(self, "Error", f"Failed to load products: {str(e)}")
+
 
         content_widget.setLayout(content_layout)
         scroll_area.setWidget(content_widget)
@@ -795,9 +891,10 @@ class MyProductsPage(QWidget):
         self.setLayout(layout)
 
     def go_back(self):
+        """Navigate back to the product list page."""
         self.main_window.set_page(ProductListPage(self.main_window, self.username))
 
-
+        
 class RatingWidget(QWidget):
     """Widget to display rating as stars."""
     def __init__(self, rating, parent=None):
