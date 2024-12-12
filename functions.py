@@ -1,7 +1,7 @@
 import sqlite3
 from socket import *
 import json
-
+from datetime import *
 
 online_users = {}
 
@@ -38,6 +38,8 @@ def client_handler(client_socket):
                 response = view_cart(data)
             elif data["command"] == "remove_from_cart":
                 response = remove_from_cart(data)
+            elif data["command"] == "view_product_buyers":
+                response = view_product_buyers(data)
             elif data["command"] == "checkout":
                 response = checkout(data)
             elif data["command"] == "add_product":
@@ -117,6 +119,35 @@ def view_products_by_owner(data):
         return {"type": 0, "error": False, "content": products}
     except Exception as e:
         return {"type": 0, "error": True, "content": f"Failed to fetch products: {str(e)}"}
+
+def view_product_buyers(data):
+    """Retrieve all buyers for a specific product."""
+    product_id = data.get("product_id")
+    print(f"[DEBUG] Received request for product buyers with product_id: {product_id}")  # Log product ID
+
+    try:
+        conn = sqlite3.connect("auboutique.db")
+        cursor = conn.cursor()
+
+        # Debug: Verify database connection
+        print("[DEBUG] Connected to the database successfully.")
+
+        # Fetch all buyers for the product
+        query = "SELECT buyer_username FROM product_buyers WHERE product_id = ?"
+        print(f"[DEBUG] Executing query: {query} with product_id={product_id}")
+        cursor.execute(query, (product_id,))
+        buyers = [{"buyer_username": row[0]} for row in cursor.fetchall()]
+
+        # Debug: Check retrieved buyers
+        print(f"[DEBUG] Buyers fetched: {buyers}")
+
+        conn.close()
+        print("[DEBUG] Database connection closed successfully.")
+        return {"type": 0, "error": False, "content": buyers}
+    except Exception as e:
+        # Debug: Log exception
+        print(f"[ERROR] Failed to fetch buyers: {str(e)}")
+        return {"type": 0, "error": True, "message": str(e)}
 
 
 def add_product(data):
@@ -251,9 +282,7 @@ def fetch_products():
     conn = sqlite3.connect("auboutique.db")
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT product_id, name, description, price, owner_username, average_rating, quantity
-        FROM products
-        WHERE buyer_username IS NULL
+        SELECT product_id, name, description, price, owner_username, average_rating, quantity FROM products
     """)
     products = cursor.fetchall()
     conn.close()
@@ -466,8 +495,8 @@ def checkout(data):
                 if available_quantity >= quantity:
                     new_quantity = available_quantity - quantity
                     cursor.execute("UPDATE products SET quantity = ? WHERE product_id = ?", (new_quantity, product_id))
-                    if new_quantity == 0:
-                        cursor.execute("DELETE FROM products WHERE product_id = ?", (product_id,))
+                    cursor.execute("INSERT INTO product_buyers (product_id, buyer_username) VALUES (?, ?)",(product_id, username),
+        )
                 else:
                     return {"type": 0, "error": True, "content": f"Insufficient stock for product ID {product_id}"}
 
@@ -476,7 +505,7 @@ def checkout(data):
 
         conn.commit()
         pickup_date = datetime.now() + timedelta(days=2)
-        return {"type": 0, "error": False, "content": "Checkout successful. You can pick up your product in "+ pickup_date+" days."}
+        return {"type": 0, "error": False, "content": f"Product purchased successfully.\nPick up your item on {pickup_date.date()} any time after 8:00 AM from AUB Post Office."}
     except sqlite3.Error as e:
         if conn:
             conn.rollback()
