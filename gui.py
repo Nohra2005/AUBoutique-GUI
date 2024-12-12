@@ -1,7 +1,7 @@
 from PyQt5.QtWidgets import ( QApplication,QComboBox, QMainWindow, QLabel, QPushButton, QVBoxLayout,QWidgetAction,QDialog,
-    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem
+    QHBoxLayout, QWidget, QScrollArea, QFrame, QInputDialog, QMessageBox, QLineEdit, QMenu, QListWidget, QListWidgetItem, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint, QMetaObject, pyqtSignal, pyqtSlot, Q_ARG
+from PyQt5.QtCore import Qt, QPropertyAnimation, QRect, QPoint, QMetaObject, pyqtSignal, pyqtSlot, Q_ARG,  QTimer
 from PyQt5.QtGui import QFont, QPainter, QBrush, QColor, QPolygon, QPixmap
 import math
 import sys  
@@ -29,18 +29,24 @@ def send_command(command, data=None):
 def listen_for_responses():
     while True:
         try:
-            response = client.recv(1024).decode('utf-8')
+            response = client.recv(4096).decode('utf-8')
             data = json.loads(response)
-            if data["type"]==0: #Command Reply
+            if data["type"] == 0:  # Command Reply
                 responses.append(data)
-            elif data["type"]==1: #Notification
-                notifs.append(data)
+            elif data["type"] == 1:  # Notification
+                app = QApplication.instance()
+                for window in app.topLevelWidgets():
+                    if isinstance(window, MainWindow):
+                        current_page = window.container_layout.itemAt(0).widget()
+                        if isinstance(current_page, ProductListPage):
+                            current_page.notification_received.emit(data)
+                            break
         except BlockingIOError:
-            time.sleep(0.1)  
-        except:
-            print("Connection to the server was lost.")
+            time.sleep(0.1)
+        except Exception as e:
+            print(f"Error listening: {e}")
             break
-        
+
 def handle_peer_connection(conn, addr):
     """
     Handle a single peer connection and directly update the chat UI.
@@ -54,9 +60,6 @@ def handle_peer_connection(conn, addr):
         sender = data["sender"]
         message = data["message"]
         timestamp = data["time"]
-        
-        # Immediately update the chat UI
-        print(f"Received message from {sender}: {message}")
         
         app = QApplication.instance()
         for window in app.topLevelWidgets():
@@ -96,14 +99,12 @@ client.connect(('localhost', 8888))
 peer_socket = socket(AF_INET, SOCK_STREAM)
 peer_socket.bind(('localhost', 0))  # Bind to any available port
 peer_socket.listen(5)
-print("listenign on ", peer_socket.getsockname())
+print("Listening for peers on ", peer_socket.getsockname())
 # Get the assigned port
 peer_port = peer_socket.getsockname()[1]
 
 
 responses=[]
-messages=[]
-notifs=[]
 listener_thread = threading.Thread(target=listen_for_responses, daemon=True)
 listener_thread.start()
 
@@ -321,9 +322,7 @@ class LoginPage(QWidget):
                 QMessageBox.information(self, "Success", response["content"])
                 self.parent().username = username  # Store logged-in username
                 self.main_window.set_page(ProductListPage(self.main_window, username))
-                screen = QApplication.desktop().screenGeometry()
-                self.main_window.resize(screen.width(), screen.height() - 50)
-                self.main_window.move(0, 0) 
+                self.main_window.showMaximized()
             else:
                 QMessageBox.warning(self, "Error", response["content"])
         else:
@@ -375,6 +374,8 @@ class ProductWidget(QFrame):
             }
         """)
 
+        self.setFixedHeight(351) #Easter Egg
+        
         # Main layout for the product widget
         layout = QHBoxLayout()
         layout.setContentsMargins(10, 10, 10, 10)
@@ -586,79 +587,6 @@ class AddProductPage(QWidget):
     def go_back(self):
         self.main_window.set_page(ProductListPage(self.main_window, self.username))
 
-class MyProductWidget(QFrame):
-    """Widget to display a product owned by the user."""
-    def __init__(self, product_id, name, description, price, quantity, main_window, username, parent=None):
-        super().__init__(parent)
-        self.product_id = product_id
-        self.name = name
-        self.description = description
-        self.price = price
-        self.quantity = quantity
-        self.main_window = main_window
-        self.username = username
-
-        # Set QFrame styling to look like a box
-        self.setFrameShape(QFrame.StyledPanel)
-        self.setFrameShadow(QFrame.Raised)
-        self.setStyleSheet("""
-            QFrame {
-                border: 1px solid #ccc;
-                border-radius: 10px;
-                background-color: #f9f9f9;
-                padding: 15px;
-            }
-            QLabel {
-                font-size: 14px;
-                color: #333;
-            }
-        """)
-
-        # Main layout for the product widget
-        layout = QVBoxLayout()
-        layout.setContentsMargins(10, 10, 10, 10)
-        layout.setSpacing(10)
-
-        # Name and description
-        name_label = QLabel(self.name)
-        name_label.setStyleSheet("font-size: 18px; font-weight: bold;")
-        description_label = QLabel(self.description)
-        description_label.setWordWrap(True)
-        description_label.setStyleSheet("font-size: 14px; color: #555;")
-
-        # Price and quantity
-        price_label = QLabel(f"Price: ${self.price:.2f}")
-        price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
-        quantity_label = QLabel(f"Quantity: {self.quantity}")
-        quantity_label.setStyleSheet("font-size: 14px; color: #333;")
-
-        # Modify Product button
-        modify_button = QPushButton("Modify Product")
-        modify_button.setStyleSheet("background-color: blue; color: white; font-size: 14px;")
-        modify_button.clicked.connect(self.modify_product)
-
-        # Add labels and button to the layout
-        layout.addWidget(name_label)
-        layout.addWidget(description_label)
-        layout.addWidget(price_label)
-        layout.addWidget(quantity_label)
-        layout.addWidget(modify_button)
-
-        self.setLayout(layout)
-
-    def modify_product(self):
-        """Open the Modify Product page for this product."""
-        self.main_window.set_page(
-            ModifyProductPage(
-                self.main_window,
-                self.username,
-                self.product_id,
-                self.name,
-                self.description,
-                self.price,
-                self.quantity
-            )
-        )
 
 
 class ModifyProductPage(QWidget):
@@ -743,10 +671,10 @@ class ModifyProductPage(QWidget):
         """Go back to the My Products page."""
         self.main_window.set_page(MyProductsPage(self.main_window, self.username))
         
-        
-class MyProductWidget(QWidget):
-    def __init__(self, product_id, name, description, price, quantity, main_window, username):
-        super().__init__()
+class MyProductWidget(QFrame):
+    """Widget to display a product owned by the user."""
+    def __init__(self, product_id, name, description, price, quantity, main_window, username, parent=None):
+        super().__init__(parent)
         self.product_id = product_id
         self.name = name
         self.description = description
@@ -755,22 +683,48 @@ class MyProductWidget(QWidget):
         self.main_window = main_window
         self.username = username
 
-        layout = QVBoxLayout()
+        # Set QFrame styling to look like a box
+        self.setFrameShape(QFrame.StyledPanel)
+        self.setFrameShadow(QFrame.Raised)
+        self.setStyleSheet("""
+            QFrame {
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                background-color: #f9f9f9;
+                padding: 15px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #333;
+            }
+        """)
 
-        # Product details
-        product_label = QLabel(f"{name} - ${price} ({quantity} left)")
-        product_label.setStyleSheet("font-weight: bold; font-size: 16px;")
-        layout.addWidget(product_label)
+        # Main layout for the product widget
+        self.layout = QVBoxLayout()
+        self.layout.setContentsMargins(10, 10, 10, 10)
+        self.layout.setSpacing(10)
 
-        description_label = QLabel(f"Description: {description}")
+        # Name and description
+        name_label = QLabel(self.name)
+        name_label.setStyleSheet("font-size: 18px; font-weight: bold;")
+        description_label = QLabel(self.description)
         description_label.setWordWrap(True)
-        layout.addWidget(description_label)
+        description_label.setStyleSheet("font-size: 14px; color: #555;")
 
-        # View Buyers button (small size)
-        view_buyers_button = QPushButton("View Buyers")
-        view_buyers_button.setFixedSize(100, 30)  # Set fixed size for smaller button
-        view_buyers_button.setStyleSheet(
-            """
+        # Price and quantity
+        price_label = QLabel(f"Price: ${self.price:.2f}")
+        price_label.setStyleSheet("font-size: 16px; font-weight: bold; color: #333;")
+        quantity_label = QLabel(f"Quantity: {self.quantity}")
+        quantity_label.setStyleSheet("font-size: 14px; color: #333;")
+
+        # Modify Product button
+        modify_button = QPushButton("Modify Product")
+        modify_button.setStyleSheet("background-color: blue; color: white; font-size: 14px;")
+        modify_button.clicked.connect(self.modify_product)
+
+        # View Buyers button
+        self.view_buyers_button = QPushButton("View Buyers")
+        self.view_buyers_button.setStyleSheet("""
             QPushButton {
                 font-size: 12px;
                 padding: 3px;
@@ -785,15 +739,45 @@ class MyProductWidget(QWidget):
             QPushButton:pressed {
                 background-color: #388E3C;
             }
-            """
+        """)
+        self.view_buyers_button.clicked.connect(self.toggle_buyers_visibility)
+
+        # Add labels and buttons to the layout
+        self.layout.addWidget(name_label)
+        self.layout.addWidget(description_label)
+        self.layout.addWidget(price_label)
+        self.layout.addWidget(quantity_label)
+        self.layout.addWidget(modify_button)
+        self.layout.addWidget(self.view_buyers_button)
+
+        self.setLayout(self.layout)
+
+    def modify_product(self):
+        """Open the Modify Product page for this product."""
+        self.main_window.set_page(
+            ModifyProductPage(
+                self.main_window,
+                self.username,
+                self.product_id,
+                self.name,
+                self.description,
+                self.price,
+                self.quantity
+            )
         )
-        view_buyers_button.clicked.connect(self.view_buyers)
-        layout.addWidget(view_buyers_button)
 
-        self.setLayout(layout)
+    def toggle_buyers_visibility(self):
+        """Toggle the visibility of the buyers widget."""
+        if hasattr(self, 'buyers_widget') and self.buyers_widget.isVisible():
+            # Hide buyers widget and update the button text
+            self.buyers_widget.setVisible(False)
+            self.view_buyers_button.setText("View Buyers")
+        else:
+            # Fetch buyers and show the buyers widget
+            self.fetch_and_display_buyers()
 
-    def view_buyers(self):
-        """Fetch and display the list of buyers for this product."""
+    def fetch_and_display_buyers(self):
+        """Fetch buyers from the server and display them."""
         try:
             data = {"product_id": self.product_id}
             response = send_command("view_product_buyers", data)  # Server call
@@ -807,27 +791,45 @@ class MyProductWidget(QWidget):
             QMessageBox.critical(self, "Error", f"Failed to fetch buyers: {str(e)}")
 
     def display_buyers(self, buyers):
-        """Show buyers in a new popup dialog."""
-        buyers_window = QDialog(self.main_window)
-        buyers_window.setWindowTitle("Product Buyers")
+        """Show buyers in a dropdown-style widget below the current product widget."""
+        # Remove the existing buyers widget if it exists
+        if hasattr(self, 'buyers_widget'):
+            self.layout.removeWidget(self.buyers_widget)
+            self.buyers_widget.deleteLater()
 
-        layout = QVBoxLayout(buyers_window)
+        # Create the buyers widget
+        self.buyers_widget = QWidget()
+        buyers_layout = QVBoxLayout()
+        self.buyers_widget.setLayout(buyers_layout)
+        self.buyers_widget.setStyleSheet("""
+            QWidget {
+                background-color: #f9f9f9;
+                border: 1px solid #ccc;
+                border-radius: 10px;
+                margin-top: 10px;
+                padding: 10px;
+            }
+            QLabel {
+                font-size: 14px;
+                color: #333;
+            }
+        """)
 
-        # List all buyers
+        # Populate buyers information
         if buyers:
             for buyer in buyers:
-                buyer_label = QLabel(f"Buyer: {buyer['buyer_username']}")
-                layout.addWidget(buyer_label)
+                buyer_info = f"Name: {buyer['name']} | Username: {buyer['username']} | Email: {buyer['email']}"
+                buyer_label = QLabel(buyer_info)
+                buyers_layout.addWidget(buyer_label)
         else:
-            layout.addWidget(QLabel("No buyers found for this product."))
+            buyers_layout.addWidget(QLabel("No buyers found for this product."))
 
-        # Close button
-        close_button = QPushButton("Close")
-        close_button.clicked.connect(buyers_window.close)
-        layout.addWidget(close_button)
+        # Add the buyers widget to the main layout
+        self.layout.addWidget(self.buyers_widget)
+        self.buyers_widget.setVisible(True)
 
-        buyers_window.setLayout(layout)
-        buyers_window.exec_()
+        # Update the button text
+        self.view_buyers_button.setText("Hide Buyers")
 
 
 class MyProductsPage(QWidget):
@@ -851,6 +853,11 @@ class MyProductsPage(QWidget):
         content_widget = QWidget()
         content_layout = QVBoxLayout(content_widget)
 
+
+        content_layout.setSpacing(10)  # Add spacing between widgets
+        content_layout.setContentsMargins(10, 10, 10, 10)  # Add margins
+        content_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
+        
         # Fetch and display user's products
         try:
             data = {"username": self.username}
@@ -977,14 +984,19 @@ class RatingWidget(QWidget):
 
 class ProductListPage(QWidget):
     """Page to display a scrollable list of product boxes with additional features."""
+    notification_received = pyqtSignal(dict)  # Signal to handle incoming notifications
+
     def __init__(self, main_window, username):
         super().__init__()
         self.username = username  # Store the logged-in username
         self.main_window=main_window
-        self.notifs = notifs
         self.current_currency = "USD"  # Default currency
         self.exchange_rates = self.fetch_exchange_rates()
         self.currency_symbols = {"USD": "$", "EUR": "€", "GBP": "£", "JPY": "¥", "INR": "₹"}
+        
+        
+        # Connect the notification signal to a handler
+        self.notification_received.connect(self.handle_notification)
 
         # Main layout
         main_layout = QVBoxLayout(self)
@@ -1005,40 +1017,6 @@ class ProductListPage(QWidget):
         self.username_button.setMenu(menu)
         header_layout.addWidget(self.username_button, stretch=0)  # No stretch for the username button
         
-        # Notification Bell Button
-        self.notification_bell_button = QPushButton("🔔")
-        self.notification_bell_button.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-            }
-            QPushButton:focus {
-                outline: none;
-            }
-        """)
-        self.notification_bell_button.clicked.connect(self.show_notifications_dropdown)
-        header_layout.addWidget(self.notification_bell_button)  
-
-
-        # Add the green dot for unread notifications
-        self.notification_indicator = QLabel()
-        self.notification_indicator.setStyleSheet("""
-            QLabel {
-                background-color: green;
-                color: white;
-                border-radius: 5px;
-                font-size: 10px;
-                min-width: 10px;
-                min-height: 10px;
-                padding: 2px;
-                text-align: center;
-            }
-        """)
-        self.notification_indicator.setVisible(False)  # Initially hidden
-
-        # Add both to the header layout
-        header_layout.addWidget(self.notification_bell_button)
-        header_layout.addWidget(self.notification_indicator)
 
         # Search bar
         self.search_bar = QLineEdit()
@@ -1085,6 +1063,12 @@ class ProductListPage(QWidget):
         # Content widget for the scroll area
         content_widget = QWidget()
         self.content_layout = QVBoxLayout(content_widget)
+        
+        self.content_layout.setSpacing(10)  # Add spacing between widgets
+        self.content_layout.setContentsMargins(10, 10, 10, 10)  # Add margins
+
+        # Prevent excessive stretching
+        content_widget.setSizePolicy(QSizePolicy.Minimum, QSizePolicy.Maximum)
 
         # Fetch products from the database and add to the content layout
         products = send_command("view_products")
@@ -1133,112 +1117,64 @@ class ProductListPage(QWidget):
 
         self.setLayout(main_layout)
 
-    def resizeEvent(self, event):
-        """Ensure the chat button and chat panel resize properly with the window."""
-        super().resizeEvent(event)
-        chat_width = self.width() // 3
-
-        # Adjust the chat panel's position and size based on its current state
-        if self.chat_panel.width() > 0:  # If the chat panel is open
-            self.chat_panel.setGeometry(self.width() - chat_width, 0, chat_width, self.height())
-        else:  # If the chat panel is closed
-            self.chat_panel.setGeometry(self.width(), 0, 0, self.height())
-
-        # Update the button position
-        self.update_chat_button_position()
-    
-    def fetch_notifications(self):
-        """Fetch notifications from the server."""
-        response = send_command("fetch_notifications", {"username": self.username})
-        if not response["error"]:
-            self.notifs = response["content"]  # Save notifications locally
-            self.update_notification_indicator()
-        else:
-            QMessageBox.warning(self, "Error", "Failed to fetch notifications.")
-
-        
-    def show_notifications_dropdown(self):
-        """Display notifications in a dropdown."""
-        self.notifications_menu = QMenu(self)
-        self.notifications_menu.setStyleSheet("""
-            QMenu {
-                background-color: #f9f9f9;
-                border: 1px solid #ccc;
-                max-height: 300px; /* Scrollable */
+        # Notification popup widget (initially hidden)
+        self.notification_popup = QLabel(self)
+        self.notification_popup.setStyleSheet("""
+            QLabel {
+                background-color: #444;
+                color: white;
+                font-size: 14px;
+                padding: 10px;
+                border-radius: 5px;
+                border: 1px solid #000;
             }
         """)
-
-        for notif in self.notifs:
-            notif_widget = QWidget()
-            layout = QHBoxLayout(notif_widget)
-
-            # Notification Text
-            notif_label = QLabel(f"{notif['owner']} added: {notif['product_name']}")
-            layout.addWidget(notif_label)
-
-            # Mark as Read Button
-            if not notif["is_read"]:
-                mark_as_read_button = QPushButton("Mark as Read")
-                mark_as_read_button.clicked.connect(lambda _, n=notif: self.mark_notification_as_read(n))
-                layout.addWidget(mark_as_read_button)
-
-            # Remove Button
-            remove_button = QPushButton("X")
-            remove_button.clicked.connect(lambda _, n=notif: self.remove_notification(n))
-            layout.addWidget(remove_button)
-
-            notif_widget.setLayout(layout)
-            action = QWidgetAction(self.notifications_menu)
-            action.setDefaultWidget(notif_widget)
-            self.notifications_menu.addAction(action)
-
-        self.notifications_menu.exec_(self.notification_bell_button.mapToGlobal(QPoint(0, self.notification_bell_button.height())))
-
-    def remove_notification(self, notif):
-        response = send_command("remove_notification", {"username": self.username, "notification_id": notif["id"]})
-        if not response["error"]:
-            self.notifs.remove(notif)
-            self.update_notification_indicator()
-            self.show_notifications_dropdown()
+        self.notification_popup.setGeometry(0, -50, self.width(), 50)  # Initially hidden above the window
+        self.notification_animation = QPropertyAnimation(self.notification_popup, b"geometry")
 
 
-    def update_notification_indicator(self):
-        """Update the green dot on the notification bell."""
-        unread_count = sum(1 for notif in self.notifs if not notif["is_read"])
-        if unread_count > 0:
-            # Add green dot
-            self.notification_bell_button.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    border: none;
-                }
-                QPushButton::after {
-                    content: '';
-                    position: absolute;
-                    width: 10px;
-                    height: 10px;
-                    background-color: green;
-                    border-radius: 5px;
-                    top: 0;
-                    right: 0;
-                }
-            """)
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        chat_width = self.width() // 3
+    
+        if self.chat_panel.width() > 0:
+            self.chat_panel.setGeometry(self.width() - chat_width, 0, chat_width, self.height())
         else:
-            # Remove green dot
-            self.notification_bell_button.setStyleSheet("""
-                QPushButton {
-                    background-color: transparent;
-                    border: none;
-                }
-            """)
+            self.chat_panel.setGeometry(self.width(), 0, 0, self.height())
+    
+        
+        self.notification_popup.setGeometry(0, -50, self.width(), 50)
+    
+        # Update the button position
+        self.update_chat_button_position()
+        
+        
+    def handle_notification(self, notification):
+        """
+        Display a notification drop-down from the top of the window.
+        """
 
-    def mark_notification_as_read(self, notif):
-        response = send_command("mark_notification_as_read", {"username": self.username, "notification_id": notif["id"]})
-        if not response["error"]:
-            notif["is_read"] = True
-            self.update_notification_indicator()
-            self.show_notifications_dropdown()
+        # Set the text of the notification popup
+        self.notification_popup.setText(f"Notification: {notification['owner']} {notification['action']} '{notification['product_name']}'")
+        self.notification_popup.setGeometry(0, -50, self.width(), 50)  # Start position above the window
 
+        # Animate the popup to slide down
+        self.notification_animation.setDuration(500)  # Animation duration in milliseconds
+        self.notification_animation.setStartValue(QRect(0, -50, self.width(), 50))
+        self.notification_animation.setEndValue(QRect(0, 0, self.width(), 50))
+        self.notification_animation.start()
+
+        # Hide the popup after 3 seconds
+        QTimer.singleShot(8000, lambda: self.hide_notification())
+
+    def hide_notification(self):
+        """
+        Hide the notification popup by sliding it back up.
+        """
+        self.notification_animation.setDuration(500)  # Animation duration in milliseconds
+        self.notification_animation.setStartValue(QRect(0, 0, self.width(), 50))
+        self.notification_animation.setEndValue(QRect(0, -50, self.width(), 50))
+        self.notification_animation.start()
 
     def toggle_chat_panel(self):
         """Slide the chat panel in and out, keeping it proportional."""
@@ -1377,7 +1313,6 @@ class CartPage(QWidget):
             data = response.json()
             return data.get("rates", {})
         except Exception as e:
-            print(f"Error fetching exchange rates: {e}")
             return {"USD": 1, "EUR": 0.85, "GBP": 0.75, "JPY": 110, "INR": 73}
 
     def update_currency(self, currency):
@@ -1493,10 +1428,10 @@ class CartPage(QWidget):
         """Clear the cart and display a success message."""
         response = send_command("checkout", {"username": self.username})
         if response["error"]:
-            QMessageBox.warning(self, "Error", "Failed to complete checkout.")
+            QMessageBox.warning(self, "Error", response["content"])
             return
 
-        QMessageBox.information(self, "Success", "Checkout successful!")
+        QMessageBox.information(self, "Success", response["content"])
         # Refresh the cart after checkout
         self.fetch_cart_items()
         
@@ -1769,10 +1704,10 @@ class ChatPanel(QWidget):
         bubble_label.setFixedWidth(300)
     
         # Create the timestamp label
-        time_label = QLabel(timestamp)
+        time_label = QLabel(str(timestamp)[:-7])
         time_label.setFont(QFont("Arial", 8))
         time_label.setStyleSheet("color: gray;")
-        time_label.setAlignment(Qt.AlignRight)
+        
         
         # Style the bubble based on the sender
         if is_user:
@@ -1783,6 +1718,7 @@ class ChatPanel(QWidget):
                     padding: 10px;
                 }
             """)
+            time_label.setAlignment(Qt.AlignRight)
             message_layout.addStretch()
             message_layout.addWidget(bubble_label)
         else:
@@ -1794,6 +1730,7 @@ class ChatPanel(QWidget):
                     border: 1px solid #ccc;
                 }
             """)
+            time_label.setAlignment(Qt.AlignLeft)
             message_layout.addWidget(bubble_label)
             message_layout.addStretch()
         
@@ -1841,7 +1778,7 @@ class ChatPanel(QWidget):
         """Handle an incoming message. Update the chat if the chat area is active."""
         def update_ui():
             if self.chat_area_widget and self.chat_owner_label.text().endswith(sender):
-                print(f"Adding message to chat from {sender}: {message}")
+
                 self.add_chat_bubble(sender, message, is_user, timestamp)
             else:
                 QMessageBox.information(self, "New Message", f"New message from {sender}: {message}")
@@ -1853,7 +1790,7 @@ class ChatPanel(QWidget):
     @pyqtSlot(str, str, str, bool)
     def handle_incoming_message(self, sender, message, timestamp, is_user):
         if self.chat_area_widget and self.chat_owner_label.text().endswith(sender):
-            print(f"Adding message to chat from {sender}: {message}")
+           
             self.add_chat_bubble(sender, message, is_user, timestamp)
         else:
             QMessageBox.information(self, "New Message", f"New message from {sender}: {message}")
@@ -1877,9 +1814,9 @@ class ChatPanel(QWidget):
                 try:
                     # Establish a temporary socket connection to send the message
                     with socket(AF_INET, SOCK_STREAM) as temp_socket:
-                        print("Sending to",ip_address,port)
+                        
                         temp_socket.connect((ip_address, port))
-                        print("Connected")
+                        
                         message_data = {
                             "sender": sender,
                             "receiver": recipient,

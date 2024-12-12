@@ -11,7 +11,7 @@ def client_handler(client_socket):
     while True:
         try:
             # Receive and decode the client's message
-            message = client_socket.recv(1024).decode('utf-8')
+            message = client_socket.recv(4096).decode('utf-8')
             if not message:
                 break
 
@@ -23,17 +23,15 @@ def client_handler(client_socket):
                 response = register_user(data)
                 if response=="Registration successful":
                     username = data["username"]
-                    online_users[username] = None
             elif data["command"] == "login":
                 response = login_user(data)
                 if response["content"] == "Login successful":
                     username = data["username"]
-                    online_users[username] = data["p2p_address"]
+                    online_users[username] = {"p2p_address":data["p2p_address"],"client_socket":client_socket}
             elif data["command"] == "rate":
                 response = rate_product(data)
             elif data["command"] == "add_to_cart":
                 response = add_to_cart(data)
-                print("response recorded")
             elif data["command"] == "view_cart":
                 response = view_cart(data)
             elif data["command"] == "remove_from_cart":
@@ -59,7 +57,7 @@ def client_handler(client_socket):
             elif data["command"] == "toggle_follow":
                 response = toggle_follow(data)
             elif data["command"] == "modify_product":
-                response = modify_product(data)
+                response = modify_product(username,data)
             elif data["command"] == "quit":
                 del online_users[username]
                 break
@@ -73,13 +71,14 @@ def client_handler(client_socket):
  
         except ConnectionResetError:
             print("Client disconnected")
-            online_users[username]=None
+            if username in online_users:
+                del online_users[username]
             break
 
     client_socket.close()
 
 
-def modify_product(data):
+def modify_product(username,data):
     """Modify an existing product in the database."""
     try:
         conn = sqlite3.connect("auboutique.db")
@@ -91,6 +90,9 @@ def modify_product(data):
             WHERE product_id = ?
         """, (data["name"], data["description"], data["price"], data["quantity"], data["product_id"]))
 
+        # Notify followers
+        notify_followers(username, data["name"], "modified")
+        
         conn.commit()
         conn.close()
 
@@ -121,132 +123,74 @@ def view_products_by_owner(data):
         return {"type": 0, "error": True, "content": f"Failed to fetch products: {str(e)}"}
 
 def view_product_buyers(data):
-    """Retrieve all buyers for a specific product."""
+    """Retrieve all buyers for a specific product along with their name and email."""
     product_id = data.get("product_id")
-    print(f"[DEBUG] Received request for product buyers with product_id: {product_id}")  # Log product ID
 
     try:
         conn = sqlite3.connect("auboutique.db")
         cursor = conn.cursor()
 
-        # Debug: Verify database connection
-        print("[DEBUG] Connected to the database successfully.")
-
         # Fetch all buyers for the product
         query = "SELECT buyer_username FROM product_buyers WHERE product_id = ?"
-        print(f"[DEBUG] Executing query: {query} with product_id={product_id}")
         cursor.execute(query, (product_id,))
-        buyers = [{"buyer_username": row[0]} for row in cursor.fetchall()]
+        buyer_usernames = [row[0] for row in cursor.fetchall()]
 
-        # Debug: Check retrieved buyers
-        print(f"[DEBUG] Buyers fetched: {buyers}")
+        # Fetch the name and email for each buyer
+        buyers = []
+        for username in buyer_usernames:
+            query = "SELECT name, email FROM users WHERE username = ?"
+            cursor.execute(query, (username,))
+            result = cursor.fetchone()
+            if result:
+                name, email = result
+                buyers.append({"username": username, "name": name, "email": email})
+            else:
+                # Handle case where user info is not found
+                buyers.append({"username": username, "name": "Unknown", "email": "Unknown"})
 
         conn.close()
-        print("[DEBUG] Database connection closed successfully.")
         return {"type": 0, "error": False, "content": buyers}
     except Exception as e:
         # Debug: Log exception
-        print(f"[ERROR] Failed to fetch buyers: {str(e)}")
         return {"type": 0, "error": True, "message": str(e)}
 
 
 def add_product(data):
     """Add a new product to the database."""
     try:
-        conn = sqlite3.connect("auboutique.db")
+        conn = sqlite3.connect("auboutique.db", check_same_thread=False)
         cursor = conn.cursor()
+
+        # Validate input data
+        product_name = data.get("name")
+        owner = data.get("owner")
+        if not product_name or not owner:
+            raise ValueError("Missing 'name' or 'owner' in the data payload.")
 
         # Insert product details into the database
         cursor.execute("""
             INSERT INTO products (name, description, price, quantity, owner_username)
             VALUES (?, ?, ?, ?, ?)
-        """, (data["name"], data["description"], data["price"], data["quantity"], data["owner"]))
+        """, (product_name, data["description"], data["price"], data["quantity"], owner))
 
-        product_name = data.get("name")
-        owner = data.get("owner")
-
-          # Notify subscribed users
-        cursor.execute(
-            "SELECT user FROM subscribed_owners WHERE owner = ?", (owner,)
-        )
-        subscribers = cursor.fetchall()
-
-        for subscriber in subscribers:
-            cursor.execute(
-                "INSERT INTO notifications (username, product_name, owner, is_read) VALUES (?, ?, ?, 0)",
-                (subscriber[0], product_name, owner),
-            )
 
         conn.commit()
         conn.close()
+        
+        # Notify followers in real-time if they are online
+        notify_followers(owner, product_name, "added")
 
+        
         return {"type": 0, "error": False, "content": "Product added successfully."}
+    except sqlite3.Error as db_error:
+        if conn:
+            conn.rollback()
+        return {"type": 0, "error": True, "content": f"Database error: {str(db_error)}"}
     except Exception as e:
         return {"type": 0, "error": True, "content": f"Failed to add product: {str(e)}"}
 
-def fetch_notifications(data):
-    """Fetch notifications for a user."""
-    username = data.get("username")
 
-    try:
-        conn = sqlite3.connect("auboutique.db")
-        cursor = conn.cursor()
 
-        cursor.execute(
-            "SELECT id, product_name, owner, is_read FROM notifications WHERE username = ?",
-            (username,),
-        )
-        notifications = [
-            {"id": row[0], "product_name": row[1], "owner": row[2], "is_read": row[3]}
-            for row in cursor.fetchall()
-        ]
-
-        conn.close()
-        return {"type": 0, "error": False, "content": notifications}
-    except Exception as e:
-        return {"type": 0, "error": True, "message": str(e)}
-
-def mark_notification_as_read(data):
-    """Mark a notification as read in the database."""
-    notification_id = data.get("notification_id")
-    username = data.get("username")
-
-    try:
-        conn = sqlite3.connect("auboutique.db")
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "UPDATE notifications SET is_read = 1 WHERE id = ? AND username = ?",
-            (notification_id, username),
-        )
-
-        conn.commit()
-        conn.close()
-
-        return {"type": 0, "error": False, "message": "Notification marked as read."}
-    except Exception as e:
-        return {"type": 0, "error": True, "message": str(e)}
-
-def remove_notification(data):
-    """Remove a notification from the database."""
-    notification_id = data.get("notification_id")
-    username = data.get("username")
-
-    try:
-        conn = sqlite3.connect("auboutique.db")
-        cursor = conn.cursor()
-
-        cursor.execute(
-            "DELETE FROM notifications WHERE id = ? AND username = ?",
-            (notification_id, username),
-        )
-
-        conn.commit()
-        conn.close()
-
-        return {"type": 0, "error": False, "message": "Notification removed."}
-    except Exception as e:
-        return {"type": 0, "error": True, "message": str(e)}
 
 
 # Server functionalities
@@ -385,46 +329,34 @@ def view_cart(data):
     try:
         conn = sqlite3.connect("auboutique.db")
         cursor = conn.cursor()
-        print("we are in view_cart")
         username = data["username"]
-        print(f"Fetching cart for username: {username}")
 
         # Fetch the user's cart
         cursor.execute("SELECT cart_list FROM carts WHERE username = ?", (username,))
         result = cursor.fetchone()
-        print(f"Fetched cart data: {result}")
 
         if result and result[0]:
-            print("Cart data found, loading it into a dictionary")
             cart_dict = json.loads(result[0])  # Load the cart as a dictionary
         else:
-            print("No cart data found, initializing empty cart")
             cart_dict = {}  # Empty cart if no data found
 
-        print("Fetching product details for each cart item...")
         cart_items = []
         for product_id, quantity in cart_dict.items():
-            print(f"Fetching product details for product_id: {product_id}")
             cursor.execute("SELECT name, price FROM products WHERE product_id = ?", (product_id,))
             product_result = cursor.fetchone()
             if product_result:
                 name, price = product_result
-                print(f"Fetched product: {name}, price: {price}, quantity: {quantity}")
                 cart_items.append({
                     "product_id": int(product_id),
                     "name": name,
                     "price": price,
                     "quantity": quantity
                 })
-            else:
-                print(f"Product with product_id {product_id} not found in database.")
-
-        print("Successfully fetched products")
+          
         conn.close()
         return {"type": 0, "error": False, "content": cart_items}
 
     except sqlite3.Error as e:
-        print(f"Error occurred while fetching cart: {e}")
         return {"type": 0, "error": True, "content": "Failed to fetch cart items: " + str(e)}
 
 def remove_from_cart(data):
@@ -513,22 +445,27 @@ def checkout(data):
     finally:
         conn.close()
 
-    
 def fetch_users(username):
     """
-    Fetch all users
+    Fetch all users with an indication if they are followed by the given user.
     """
     conn = sqlite3.connect("auboutique.db")
     cursor = conn.cursor()
 
     # Query to fetch all users except the current user
     query = """
-    SELECT username
-    FROM users
-    WHERE username != ?
-    ORDER BY username ASC;
+    SELECT u.username, 
+           CASE 
+               WHEN so.owner IS NOT NULL THEN 1
+               ELSE 0
+           END AS is_followed
+    FROM users u
+    LEFT JOIN subscribed_owners so 
+    ON u.username = so.owner AND so.user = ?
+    WHERE u.username != ?
+    ORDER BY u.username ASC;
     """
-    cursor.execute(query, (username,))
+    cursor.execute(query, (username, username))
     results = cursor.fetchall()
 
     conn.close()
@@ -537,11 +474,14 @@ def fetch_users(username):
     response = []
     for row in results:
         chat_partner = row[0]
+        is_followed = bool(row[1])  # Convert 1/0 to True/False
         response.append({
             "owner": chat_partner,
+            "is_followed": is_followed
         })
 
     return {"type": 0, "error": False, "content": response}
+
 
 
 def check_online_status(data):
@@ -550,8 +490,7 @@ def check_online_status(data):
     """
     username = data["username"]
     if username in online_users:
-        print(online_users[username])
-        ip_address, port = online_users[username]  # Retrieve IP and port of peer to peer connection
+        ip_address, port = online_users[username]["p2p_address"]  # Retrieve IP and port of peer to peer connection
         return {"type": 0, "error": False, "content": {"is_online": True, "ip_address": ip_address, "port": port}}
     else:
         return {"type": 0, "error": False, "content": {"is_online": False}}
@@ -573,7 +512,7 @@ def store_message(data):
         # Insert message into the messages table
         query = """
         INSERT INTO messages (sender, receiver, message, time)
-        VALUES (?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?)
         """
         cursor.execute(query, (sender, receiver, message, timestamp))
         conn.commit()
@@ -620,38 +559,74 @@ def toggle_follow(data):
     owner = data.get("owner")
     action = data.get("action")
 
-    # Print the input data for debugging
-    print(f"DEBUG: Received request with username={username}, owner={owner}, action={action}")
-
     if not username or not owner or action not in ["follow", "unfollow"]:
-        print("ERROR: Invalid request parameters.")
+        
         return {"type": 0, "error": True, "message": "Invalid request parameters."}
 
     try:
         # Connect to the database
         conn = sqlite3.connect("auboutique.db")
         cursor = conn.cursor()
-        print("DEBUG: Connected to the database.")
-
+        
         # Perform the database operation
         if action == "follow":
-            print(f"DEBUG: Executing FOLLOW query for username={username} and owner={owner}.")
             cursor.execute("INSERT INTO subscribed_owners (user, owner) VALUES (?, ?)", (username, owner))
         elif action == "unfollow":
-            print(f"DEBUG: Executing UNFOLLOW query for username={username} and owner={owner}.")
             cursor.execute("DELETE FROM subscribed_owners WHERE user = ? AND owner = ?", (username, owner))
 
         # Commit changes
         conn.commit()
-        print("DEBUG: Database changes committed successfully.")
 
         # Close the connection
         conn.close()
-        print("DEBUG: Database connection closed.")
 
         # Return success
         return {"type": 0, "error": False, "message": f"Successfully {action}ed {owner}."}
 
     except Exception as e:
-        print(f"ERROR: An exception occurred: {e}")
         return {"type": 0, "error": True, "message": str(e)}
+
+def notify_followers(owner, product_name, action_type):
+    """
+    Notify all followers of the owner when a product is added or modified.
+    """
+    conn = sqlite3.connect("auboutique.db")
+    cursor = conn.cursor()
+
+    # Fetch all followers of the owner
+    query = "SELECT user FROM subscribed_owners WHERE owner = ?"
+    cursor.execute(query, (owner,))
+    followers = cursor.fetchall()
+    conn.commit()
+    conn.close()
+    
+    notification = {
+        "type": 1,  # Notification type
+        "owner": owner,
+        "product_name": product_name,
+        "action": action_type  # 'added' or 'modified'
+    }
+    
+    for follower in followers:
+        follower_username = follower[0]
+        if follower_username in online_users:
+            # Notify online users
+            send_to_client(follower_username, notification)
+    
+
+
+def send_to_client(username, notification):
+    """
+    Send a notification to an online user using their existing client-server socket.
+    """
+    if username in online_users:
+        client_socket = online_users[username]["client_socket"]  # Get the client's socket
+        try:
+            # Send the notification directly through the existing socket
+            client_socket.send(json.dumps(notification).encode('utf-8'))
+        except Exception as e:
+            print(f"Failed to send notification to {username}: {e}")
+            # Optionally handle the error, e.g., remove the user from online_users
+    
+
+
